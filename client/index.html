@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="sl">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#1b1f2a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Skrivalnica" />
+    <meta name="description" content="Večigralska igra skrivanja: spremeni se v predmet ali lovi skrivalce." />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <title>Skrivalnica</title>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <!-- ===== HUD (med igro) ===== -->
+    <div id="hud" class="hidden">
+      <div class="hud-top">
+        <div class="hud-left">
+          <div id="role-badge" class="badge">—</div>
+          <div class="hp"><div id="hp-fill"></div><span id="hp-text">100</span></div>
+        </div>
+        <div class="hud-center">
+          <div id="phase-label"></div>
+          <div id="timer">0:00</div>
+        </div>
+        <div class="hud-right">
+          <div id="props-left"></div>
+          <button id="btn-menu" class="icon-btn" aria-label="Meni">☰</button>
+        </div>
+      </div>
+      <div id="killfeed"></div>
+      <div id="crosshair" class="dot"></div>
+      <div id="target-label" class="hidden"></div>
+      <div id="ammo" class="hidden"></div>
+      <div id="banner" class="hidden"></div>
+      <div id="spectate-bar" class="hidden">
+        <span id="spectate-name"></span>
+        <button id="btn-next-spec" class="small-btn">Naslednji ▶</button>
+      </div>
+      <div id="desktop-help" class="hidden"></div>
+
+      <div id="scope-overlay" class="hidden"></div>
+      <div id="lock-badge" class="hidden">🔒 Zaklenjen – obračaš samo kamero</div>
+      <div id="transform-list" class="hidden"></div>
+
+      <div id="touch-controls" class="hidden">
+        <div id="touch-layer"></div>
+        <div id="joy-base" class="idle">
+          <span class="arr up">▲</span><span class="arr down">▼</span><span class="arr left">◀</span><span class="arr right">▶</span>
+          <div id="joy-knob"></div>
+        </div>
+        <div class="tbtns">
+          <button class="tbtn big" id="btn-fire" data-for="hunter">🔫<span>Strel</span></button>
+          <button class="tbtn big" id="btn-transform" data-for="prop">✨<span>Spremeni</span></button>
+          <button class="tbtn jump" id="btn-jump" data-for="hunter prop">⬆<span>Skok</span></button>
+          <button class="tbtn" id="btn-reload" data-for="hunter">↻<span>Polni</span></button>
+          <button class="tbtn" id="btn-scope" data-for="hunter">🔭<span>Merek</span></button>
+          <button class="tbtn" id="btn-weapon" data-for="hunter">🎯<span>Ostrostr.</span></button>
+          <button class="tbtn" id="btn-radar" data-for="hunter">📡<span>Radar</span></button>
+          <button class="tbtn" id="btn-decoy" data-for="prop">🎭<span>Vaba 2</span></button>
+          <button class="tbtn" id="btn-lock" data-for="prop">🔓<span>Zakleni</span></button>
+        </div>
+      </div>
+
+      <div id="damage-flash"></div>
+      <div id="blind" class="hidden">
+        <div class="blind-title">Skrivalci se skrivajo …</div>
+        <div id="blind-timer">0</div>
+        <div class="blind-sub">Ko se odšteje do nič, začni iskati!</div>
+      </div>
+    </div>
+
+    <!-- ===== Domov ===== -->
+    <div id="screen-home" class="screen">
+      <div class="card">
+        <h1 class="logo">Skrivalnica</h1>
+        <p class="tagline">Spremeni se v predmet – ali pa lovi tiste, ki so se.</p>
+        <label class="field">
+          <span>Tvoje ime</span>
+          <input id="inp-name" maxlength="16" autocomplete="nickname" placeholder="npr. Maja" />
+        </label>
+        <button id="btn-create" class="primary">Ustvari sobo</button>
+        <div class="or">ali</div>
+        <div class="join-row">
+          <input id="inp-code" maxlength="4" autocomplete="off" autocapitalize="characters" placeholder="KODA" />
+          <button id="btn-join" class="secondary">Pridruži se</button>
+        </div>
+        <div class="row-btns">
+          <button id="btn-help" class="link-btn">Kako se igra?</button>
+          <button id="btn-settings-home" class="link-btn">Nastavitve</button>
+        </div>
+        <div id="home-error" class="error"></div>
+      </div>
+    </div>
+
+    <!-- ===== Čakalnica ===== -->
+    <div id="screen-lobby" class="screen hidden">
+      <div class="card wide">
+        <div class="lobby-head">
+          <div>
+            <div class="muted">Koda sobe</div>
+            <div id="lobby-code" class="code">----</div>
+          </div>
+          <button id="btn-share" class="secondary">Deli povezavo</button>
+        </div>
+        <div class="lobby-body">
+          <div class="lobby-col">
+            <h3>Igralci <span id="lobby-count" class="muted"></span></h3>
+            <ul id="lobby-players" class="players"></ul>
+          </div>
+          <div class="lobby-col">
+            <h3>Nastavitve</h3>
+            <label class="setting">Mapa
+              <select id="set-map"></select>
+            </label>
+            <label class="setting">Čas skrivanja
+              <select id="set-hide"><option value="20">20 s</option><option value="30">30 s</option><option value="45">45 s</option></select>
+            </label>
+            <label class="setting">Čas lova
+              <select id="set-hunt"><option value="120">2 min</option><option value="180">3 min</option><option value="300">5 min</option></select>
+            </label>
+            <label class="setting">Lovci
+              <select id="set-hunters"><option value="0">samodejno</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select>
+            </label>
+            <label class="setting">Število rund
+              <select id="set-rounds"><option value="3">3</option><option value="5">5</option><option value="8">8</option></select>
+            </label>
+            <label class="setting">Kazen za napačen strel
+              <select id="set-penalty"><option value="1">vklopljena</option><option value="0">izklopljena</option></select>
+            </label>
+            <div id="settings-note" class="muted small"></div>
+          </div>
+        </div>
+        <div class="lobby-actions">
+          <button id="btn-leave" class="secondary">Zapusti</button>
+          <button id="btn-start" class="primary">Začni igro</button>
+        </div>
+        <div id="lobby-hint" class="muted small center"></div>
+      </div>
+    </div>
+
+    <!-- ===== Konec runde ===== -->
+    <div id="screen-roundend" class="overlay hidden">
+      <div class="card">
+        <h2 id="roundend-title"></h2>
+        <div id="roundend-sub" class="muted"></div>
+        <table class="scores"><tbody id="roundend-scores"></tbody></table>
+        <div class="muted small center">Naslednja runda se začne kmalu …</div>
+      </div>
+    </div>
+
+    <!-- ===== Konec igre ===== -->
+    <div id="screen-gameend" class="screen hidden">
+      <div class="card">
+        <h2>Konec igre!</h2>
+        <div id="gameend-winner" class="winner"></div>
+        <table class="scores"><tbody id="gameend-scores"></tbody></table>
+        <div class="lobby-actions">
+          <button id="btn-gameend-leave" class="secondary">Zapusti sobo</button>
+          <button id="btn-gameend-lobby" class="primary">Nazaj v čakalnico</button>
+        </div>
+        <div id="gameend-wait" class="muted small center"></div>
+      </div>
+    </div>
+
+    <!-- ===== Meni med igro ===== -->
+    <div id="screen-menu" class="overlay hidden">
+      <div class="card narrow">
+        <h2>Premor</h2>
+        <p class="muted small">Igra teče naprej – drugi te še vedno vidijo.</p>
+        <button id="btn-resume" class="primary">Nadaljuj</button>
+        <button id="btn-settings-game" class="secondary">Nastavitve</button>
+        <button id="btn-help-game" class="secondary">Kako se igra?</button>
+        <button id="btn-quit" class="danger">Zapusti sobo</button>
+      </div>
+    </div>
+
+    <!-- ===== Nastavitve ===== -->
+    <div id="screen-settings" class="overlay hidden">
+      <div class="card narrow">
+        <h2>Nastavitve</h2>
+        <label class="setting col">Občutljivost pogleda <b id="sens-val"></b>
+          <input id="inp-sens" type="range" min="0.2" max="3" step="0.1" />
+        </label>
+        <label class="setting col">Glasnost <b id="vol-val"></b>
+          <input id="inp-vol" type="range" min="0" max="1" step="0.05" />
+        </label>
+        <label class="setting">Kakovost slike
+          <select id="inp-quality"><option value="0">nizka</option><option value="1">srednja</option><option value="2">visoka</option></select>
+        </label>
+        <label class="setting">Obrni navpični pogled
+          <select id="inp-invert"><option value="0">ne</option><option value="1">da</option></select>
+        </label>
+        <button id="btn-settings-close" class="primary">Zapri</button>
+      </div>
+    </div>
+
+    <!-- ===== Pomoč ===== -->
+    <div id="screen-help" class="overlay hidden">
+      <div class="card narrow help">
+        <h2>Kako se igra?</h2>
+        <p><b>Skrivalci</b> se v času skrivanja razbežijo po mapi. Pomeri v predmet (stol, sod, žogo …) in pritisni <b>Spremeni</b> – postaneš ta predmet. Z gumbom <b>Zakleni</b> obstaneš na mestu in v isti smeri, kamero pa lahko še vedno obračaš.</p>
+        <p><b>Lovci</b> med skrivanjem ne vidijo ničesar. Ko se začne lov, iščejo predmete, ki so »odveč« ali na čudnem mestu, in streljajo nanje. Strel v pravi predmet lovcu vzame malo življenja! Lovec ima <b>pištolo</b> (hitra, do 18 m) in <b>ostrostrelko</b> (močna; skozi <b>merek 🔭</b> do 45 m, pogled se takrat obrača počasneje). Ko lovec skrivalca enkrat zadane, mu merek nanj rahlo pomaga.</p>
+        <p>Na mapi <b>Construction</b> imaš nabor 6 oblik – z gumbom <b>Zamenjaj</b> preklapljaš med njimi (taki predmeti so tudi po mapi); ostali predmeti so okras. Stavba ima štiri nivoje – po stopnicah se splača splezati.</p>
+        <p>Po vsaki spremembi moraš počakati <b>5 s</b>, preden se spremeniš znova. Skrivalec ima 2 <b>vabi 🎭</b>: pusti lažno kopijo sebe – če jo lovec ustreli, izgubi življenje, ti pa dobiš točke. Lovec ima <b>radar 📡</b> (vsakih 25 s), ki pove, koliko pravih skrivalcev je v 12 m (vab ne zazna). Za vsak ulov lovec dobi +20 ❤.</p>
+        <p>Če skrivalec preživi do konca, zmagajo skrivalci.</p>
+        <p class="muted small">Telefon: levi palec – hoja, desni palec – pogled. Računalnik: WASD, miška, klik = strel, 1/2 ali X = orožje, F = radar, G = vaba, desni klik ali Z = merek, E = spremeni, Q = zakleni, R = polni, presledek = skok, Esc = meni.</p>
+        <button id="btn-help-close" class="primary">Razumem</button>
+      </div>
+    </div>
+
+    <div id="rotate">
+      <div class="rotate-icon">📱↻</div>
+      <div>Obrni telefon v ležeč položaj</div>
+    </div>
+    <div id="conn-status" class="hidden">Povezujem s strežnikom …</div>
+    <div id="toasts"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

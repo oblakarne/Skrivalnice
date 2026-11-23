@@ -1,0 +1,92 @@
+import { describe, expect, it } from 'vitest';
+import { resolveShot, type ShotTarget } from './combat';
+import { GUN_RANGE, GUN_RANGE_SCOPED } from './constants';
+import { propIndex, PROPS } from './props';
+import { getWorld } from './world';
+
+const world = getWorld('hisa');
+
+// Kavč v dnevni sobi (6.0, 25.43) ob steni; skrivalec-medvedek tik pred njim.
+const sofaIdx = world.map.props.findIndex((p) => PROPS[p.type]!.id === 'kavc' && p.x === 6.0);
+const sofa = world.map.props[sofaIdx]!;
+const bear: ShotTarget = { id: 'medo', x: 7.4, y: 0, z: 23.8, yaw: 0, model: propIndex('medvedek') };
+
+function shotAt(tx: number, ty: number, tz: number, from = { x: 7.4, y: 1.5, z: 17 }) {
+  const dx = tx - from.x;
+  const dy = ty - from.y;
+  const dz = tz - from.z;
+  const len = Math.hypot(dx, dy, dz);
+  return { ox: from.x, oy: from.y, oz: from.z, dx: dx / len, dy: dy / len, dz: dz / len };
+}
+
+describe('resolveShot in pomoč pri merjenju', () => {
+  it('neposreden zadetek skrivalca', () => {
+    const r = resolveShot(world, shotAt(7.4, 0.35, 23.8), 60, [bear]);
+    expect(r.kind).toBe('player');
+    expect(r.target).toBe('medo');
+    expect(r.assisted).toBe(false);
+  });
+
+  // Medvedek sredi dnevne sobe; lovec cilja 20 cm nad njegovo glavo – za njim je samo stena.
+  const open: ShotTarget = { id: 'medo', x: 14.0, y: 0, z: 21.0, yaw: 0, model: propIndex('medvedek') };
+  const hunterPos = { x: 14.0, y: 1.5, z: 15.0 };
+
+  it('brez prejšnjega zadetka ni pomoči (zgrešen strel zadene steno)', () => {
+    const r = resolveShot(world, shotAt(14.0, 0.69 + 0.2, 21.0, hunterPos), 60, [open]);
+    expect(r.kind).toBe('wall');
+  });
+
+  it('po prvem zadetku tak strel zadene skrivalca (pomoč)', () => {
+    const r = resolveShot(world, shotAt(14.0, 0.69 + 0.2, 21.0, hunterPos), 60, [open], new Set(['medo']));
+    expect(r.kind).toBe('player');
+    expect(r.target).toBe('medo');
+    expect(r.assisted).toBe(true);
+  });
+
+  it('pomoč je majhna (strel 1 m mimo zgreši tudi po prvem zadetku)', () => {
+    const r = resolveShot(world, shotAt(15.0, 0.4, 21.0, hunterPos), 60, [open], new Set(['medo']));
+    expect(r.kind).not.toBe('player');
+  });
+
+  it('pomoč NIKOLI ne ukrade strela v pravi predmet (kavč ostane kavč)', () => {
+    // Medvedek stoji tik ob kavču; lovec cilja v kavč tik ob medvedku.
+    const nearSofa: ShotTarget = { ...bear, x: sofa.x - 1.3, z: 25.4 };
+    const r = resolveShot(world, shotAt(sofa.x - 0.9, 0.4, sofa.z), 60, [nearSofa], new Set(['medo']));
+    expect(r.kind).toBe('prop');
+    expect(r.propIndex).toBe(sofaIdx);
+  });
+
+  it('brez merka strel ne seže dlje od 18 m, z merkom pa do 45 m', () => {
+    const far: ShotTarget = { id: 'dalec', x: 28.5, y: 0, z: 11, yaw: 0, model: propIndex('zoga') };
+    const ray = shotAt(28.5, 0.2, 11, { x: 2.5, y: 1.5, z: 11 });
+    const normal = resolveShot(world, ray, GUN_RANGE, [far]);
+    expect(normal.kind).toBe('none');
+    expect(normal.t).toBe(GUN_RANGE);
+    const scoped = resolveShot(world, ray, GUN_RANGE_SCOPED, [far]);
+    expect(scoped.kind).toBe('player');
+    expect(scoped.t).toBeGreaterThan(GUN_RANGE);
+  });
+
+  it('na mapi Construction je strel v okras brez kazni, v predmet za skrivanje pa s kaznijo', () => {
+    const cw = getWorld('construction');
+    const shootProp = (id: string): string => {
+      const i = cw.map.props.findIndex((pl) => PROPS[pl.type]!.id === id && pl.y === 0);
+      const pl = cw.map.props[i]!;
+      const h = PROPS[pl.type]!.h;
+      // Od zgoraj navzdol – nič vmes.
+      return resolveShot(cw, { ox: pl.x, oy: pl.y + h + 1, oz: pl.z, dx: 0, dy: -1, dz: 0 }, 10, []).kind;
+    };
+    expect(shootProp('mesalnik')).toBe('wall');
+    expect(shootProp('opeka')).toBe('prop');
+    expect(shootProp('cev')).toBe('wall');
+    expect(shootProp('sodrumen')).toBe('prop');
+    expect(shootProp('kolut')).toBe('prop');
+  });
+
+  it('pomoč ne deluje skozi steno', () => {
+    // Skrivalec v kuhinji, lovec na hodniku cilja v steno ob vratih.
+    const kitchen: ShotTarget = { id: 'k', x: 13.0, y: 0, z: 8.5, yaw: 0, model: propIndex('zoga') };
+    const r = resolveShot(world, shotAt(13.0, 0.4, 9.0, { x: 13.0, y: 1.5, z: 11.5 }), 60, [kitchen], new Set(['k']));
+    expect(r.kind).toBe('wall');
+  });
+});
