@@ -236,7 +236,6 @@ export async function createGameServer(options: GameServerOptions): Promise<Runn
         const reply = toAck<TransformResult>(ack);
         const c = current();
         if (!c) return reply({ ok: false, error: 'Nisi v sobi.' });
-        if (process.env.SKR_DEBUG) console.error('DBG transform prejet', Date.now());
         reply(c.room.handleTransform(c.player, index));
       }),
     );

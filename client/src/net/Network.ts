@@ -69,7 +69,6 @@ export class Network {
   }
 
   transform(index: number): Promise<TransformResult> {
-    (window as unknown as { __dbgT?: number }).__dbgT = Date.now();
     return this.ack(() => this.socket.timeout(ACK_TIMEOUT_MS).emitWithAck('transform', index), {
       ok: false,
       error: 'Ni odziva – poskusi znova.',

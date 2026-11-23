@@ -856,10 +856,7 @@ export class Game {
         1600,
       );
     }
-    if (inp.consume('transform') && isProp) {
-      (window as unknown as { __dbgC?: number }).__dbgC = Date.now();
-      this.tryTransform(now);
-    }
+    if (inp.consume('transform') && isProp) this.tryTransform(now);
     if (inp.consume('decoy') && isProp) this.placeDecoy();
     if (inp.consume('radar') && this.role === 'hunter' && this.alive) {
       if (this.phase !== 'hunting') this.hooks.toast('Radar deluje med lovom.');

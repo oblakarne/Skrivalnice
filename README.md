@@ -50,7 +50,8 @@ Na telefonih (povezanih na **isti Wi-Fi**) odpri naslov »Omrežje«. Če se ne 
 2. Prijatelji vpišejo kodo → **Pridruži se**. Gostitelj (👑) izbere mapo, nastavi čase in število rund ter pritisne **Začni igro**.
 3. **Skrivanje** (30 s): skrivalci pomerijo v predmet v bližini (obrobi se zeleno) in pritisnejo **Spremeni**. Z **Zakleni** obstaneš na mestu in v isti smeri – obračaš lahko samo kamero. Lovci ta čas ne vidijo ničesar.
 4. **Lov** (3 min): lovci streljajo na sumljive predmete s **pištolo** (hitra, do 18 m) ali **ostrostrelko** (50 škode; skozi merek 🔭 do 45 m, pogled se obrača počasneje). Strel v pravi predmet lovcu vzame 5 življenja! Ko lovec skrivalca prvič zadane, mu merek nanj rahlo pomaga – a nikoli ne »preskoči« na skrivalca, če lovec zadene pravi predmet (npr. kavč poleg njega).
-5. Zmagajo lovci, če ujamejo vse skrivalce; sicer zmagajo skrivalci. Vloge se vsako rundo zamenjajo.
+5. Po vsaki spremembi moraš počakati **5 s** (odštevanje je na gumbu). Skrivalec ima 2 **vabi 🎭** – lažni kopiji sebe; če lovec ustreli vabo, izgubi 5 ❤, skrivalec pa dobi +20 točk. Lovec ima **radar 📡** (vsakih 25 s): pove, koliko pravih skrivalcev je v 12 m (vab ne zazna). Za vsak ulov lovec dobi +20 ❤. Ob koncu lova opozorilo »Še 30 sekund!« in odštevanje.
+6. Zmagajo lovci, če ujamejo vse skrivalce; sicer zmagajo skrivalci. Vloge se vsako rundo zamenjajo.
 
 **Točke:** ulov +100 · vsakih 10 s preživetja +10 · preživeta runda +50
 
@@ -61,6 +62,8 @@ Na telefonih (povezanih na **isti Wi-Fi**) odpri naslov »Omrežje«. Če se ne 
 | Strel | 🔫 (drži in vleci za merjenje) | levi klik |
 | Orožje (pištola / ostrostrelka) | 🎯 / 🔫 | 1 / 2 ali X |
 | Merek (samo ostrostrelka) | 🔭 | desni klik ali Z |
+| Radar (lovec) | 📡 | F |
+| Vaba (skrivalec) | 🎭 | G |
 | Spremeni se / Zamenjaj obliko | ✨ | E |
 | Zakleni / odkleni (stoj pri miru) | 🔓 | Q |
 | Skok / polni | ⬆ / ↻ | presledek / R |

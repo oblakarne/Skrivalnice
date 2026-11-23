@@ -51,7 +51,7 @@ async function waitHealth() {
 }
 
 const server = spawn(process.execPath, ['server/dist/index.js'], {
-  env: { ...process.env, PORT: String(PORT), SKR_TIME_SCALE: '0.3', NODE_ENV: 'production', SKR_DEBUG: '1' },
+  env: { ...process.env, PORT: String(PORT), SKR_TIME_SCALE: '0.3', NODE_ENV: 'production' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 server.stderr.on('data', (d) => {
@@ -263,13 +263,12 @@ try {
     }
     if (game.target < 0) return { ok: false };
     const label = document.getElementById('target-label').textContent;
-    window.__dbgTrig = Date.now();
     input.trigger('transform');
     const t0 = performance.now();
     for (let i = 0; i < 70 && game.model === 0; i++) await new Promise((r) => setTimeout(r, 100));
     window.__transformMs = performance.now() - t0;
     const toasts = [...document.querySelectorAll('#toasts .toast')].map((t) => t.textContent);
-    return { ok: game.model > 0, model: game.model, label, toasts, target: game.target, pending: game.transformPending, readyIn: game.transformReadyAt - performance.now(), connected: window.__skr.net.socket.connected, phase: game.phase, ms: Math.round(window.__transformMs), transport: window.__skr.net.socket.io.engine.transport.name, trig: window.__dbgTrig, consumed: window.__dbgC, emitted: window.__dbgT };
+    return { ok: game.model > 0, model: game.model, label, toasts, target: game.target, pending: game.transformPending, readyIn: game.transformReadyAt - performance.now(), connected: window.__skr.net.socket.connected, phase: game.phase, ms: Math.round(window.__transformMs), transport: window.__skr.net.socket.io.engine.transport.name };
   });
   log('sprememba:', JSON.stringify(tr));
   if (!tr.ok) fail('Skrivalec se ni spremenil v predmet');
