@@ -244,7 +244,8 @@ function settingFromSelect(id: string, key: keyof RoomSettings): void {
   const s = $<HTMLSelectElement>(id);
   s.addEventListener('change', () => {
     const v = s.value;
-    const patch: Partial<RoomSettings> = key === 'penalty' ? { penalty: v === '1' } : { [key]: Number(v) };
+    const patch: Partial<RoomSettings> =
+      key === 'penalty' || key === 'radar' ? { [key]: v === '1' } : { [key]: Number(v) };
     net.updateSettings(patch);
   });
 }
@@ -262,6 +263,7 @@ settingFromSelect('set-hunt', 'huntTime');
 settingFromSelect('set-hunters', 'hunters');
 settingFromSelect('set-rounds', 'rounds');
 settingFromSelect('set-penalty', 'penalty');
+settingFromSelect('set-radar', 'radar');
 
 $('btn-start').addEventListener('click', () => {
   enterImmersive();

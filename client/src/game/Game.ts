@@ -6,14 +6,15 @@ import {
   collisionYaw,
   distanceToProp,
   getWorld,
-  WEAPONS,
-  type WeaponId,
-  SCOPE_FOV,
-  SCOPE_SENS_FACTOR,
-  SCOPE_SPEED_FACTOR,
+  SHOVEL_INTERVAL_MS,
+  boxesFor,
+  elevatorBox,
+  elevatorY,
+  type Box,
   HP_MAX,
   HUNTER_EYE,
   MODEL_GHOST,
+  type RadarResult,
   MODEL_HUNTER,
   MOVE_SPEED,
   PHYSICS_DT,
@@ -24,6 +25,7 @@ import {
   raycastWorld,
   resolveHorizontal,
   resolveShot,
+  resolveSwing,
   shapeOf,
   shotRayFromCamera,
   stepBody,
@@ -51,9 +53,19 @@ import { Effects } from './Effects';
 import { hunterModel, propMesh, type HunterModel } from './models';
 import { RemotePlayers, type RemotePlayer } from './RemotePlayers';
 import { buildWorldView, type WorldViewHandle } from './WorldView';
+import { RadarView } from '../ui/RadarView';
 
 const IN_ROUND = new Set<Phase>(['hiding', 'hunting', 'roundEnd']);
 const PIXEL_RATIOS = [1, 1.5, 2];
+const MIN_RENDER_MS = ((): number => {
+  try {
+    const q = new URLSearchParams(location.search);
+    const fps = Number(q.get('fps'));
+    return q.has('debug') && fps > 0 ? 1000 / fps : 0;
+  } catch {
+    return 0;
+  }
+})();
 
 export interface GameHooks {
   toast: (msg: string) => void;
@@ -102,10 +114,16 @@ export class Game {
 
   // Orožje
   private hp = HP_MAX;
-  private ammo = WEAPONS.pistol.mag;
-  private weapon: WeaponId = 'pistol';
+  /** Število zamahov z lopato (za teste). */
+  swingCount = 0;
+  /** Imena skrivalcev so trenutno razkrita. */
+  private reveal = false;
+  /** Razlika med uro strežnika in performance.now() (za dvigalo). */
+  private clockOffset = Number.NaN;
+  private autoShapeIn = -1;
   private walkPhase = 0;
   private frameDt = 0;
+  private lastRender = 0;
   private decoysLeft = 0;
   private radarReadyAt = 0;
   private warned30 = false;
@@ -114,9 +132,7 @@ export class Game {
   private walkAmount = 0;
   private lastBodyX = 0;
   private lastBodyZ = 0;
-  private reloading = false;
   private nextFireAt = 0;
-  private lastShotAt = 0;
 
   // Skrivalec
   private target = -1;
@@ -129,10 +145,7 @@ export class Game {
   private targetText: string | null = null;
 
   // Merek (lovec)
-  private scoped = false;
-  private scopeToggle = false;
   private lastRangeHint = 0;
-  private baseFov = 70;
 
   // Gledalec
   private specId: string | null = null;
@@ -148,6 +161,7 @@ export class Game {
 
   // Začasni vektorji
   private readonly fwd = new THREE.Vector3();
+  private readonly radarView: RadarView;
   private readonly tmpA = new THREE.Vector3();
   private readonly tmpB = new THREE.Vector3();
 
@@ -160,12 +174,18 @@ export class Game {
     private readonly settings: UserSettings,
     private readonly hooks: GameHooks,
   ) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+    // Glajenje robov pri srednji/visoki kakovosti (manj nazobčani, mehkejši robovi).
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: settings.quality >= 1,
+      powerPreference: 'high-performance',
+    });
     this.applyQuality();
     this.scene.background = new THREE.Color(0x20242e);
     this.camera.rotation.order = 'YXZ';
     this.remotes = new RemotePlayers(this.scene);
     this.effects = new Effects(this.scene);
+    this.radarView = new RadarView(document.getElementById('hud') ?? document.body, () => this.camYaw);
 
     const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1));
     edges.translate(0, 0.5, 0);
@@ -226,6 +246,7 @@ export class Game {
   stop(): void {
     if (!this.running) return;
     this.running = false;
+    this.radarView.hide();
     this.renderer.setAnimationLoop(null);
     this.remotes.clear();
     this.effects.clear();
@@ -271,19 +292,16 @@ export class Game {
     this.model = this.role === 'hunter' ? MODEL_HUNTER : MODEL_GHOST;
     this.locked = false;
     this.hp = HP_MAX;
-    this.ammo = WEAPONS.pistol.mag;
-    this.weapon = 'pistol';
-    this.hud.setWeapon('pistol');
-    this.reloading = false;
+    this.reveal = false;
+    this.autoShapeIn = -1;
     this.target = -1;
     this.transformReadyAt = 0;
     this.transformPending = false;
     this.marked.clear();
     this.radarReadyAt = 0;
+    this.radarView.hide();
     this.warned30 = false;
     this.lastHuntBeep = -1;
-    this.scopeToggle = false;
-    this.setScoped(false);
     this.specId = null;
     this.modelLockUntil = 0;
     this.lastBeep = -1;
@@ -329,9 +347,8 @@ export class Game {
         this.hud.damageFlash();
         this.audio.hurt();
       }
-      this.reloading = s.you.reloading;
+      this.autoShapeIn = s.you.autoShapeIn;
       this.decoysLeft = s.you.decoys;
-      if (s.you.weapon === this.weapon && (this.reloading || now - this.lastShotAt > 450)) this.ammo = s.you.ammo;
     }
     const mine = s.p.find((p) => p[0] === this.myId);
     if (mine) {
@@ -340,7 +357,17 @@ export class Game {
       if (this.alive && !alive) this.onLocalDeath();
       this.alive = alive;
     }
+    if (s.reveal && !this.reveal && this.phase === 'hunting') {
+      this.hud.showBanner(this.role === 'hunter' ? '👀 Imena skrivalcev so vidna 10 s!' : '👀 Lovci te 10 s vidijo po imenu – pazi!', 2500);
+    }
+    this.reveal = s.reveal;
+    // Ura strežnika za usklajeno dvigalo (vzamemo najmanjši zamik = najhitrejši paket).
+    const off = s.clock - now;
+    if (Number.isNaN(this.clockOffset) || off < this.clockOffset || Math.abs(off - this.clockOffset) > 2000) this.clockOffset = off;
     const died = this.remotes.apply(s.p, this.myId, now);
+    for (const rp of this.remotes.changed) {
+      this.effects.smoke(this.tmpA.copy(rp.pos).setY(rp.pos.y + 0.3), Math.max(0.8, shapeOf(rp.model).h));
+    }
     for (const d of died) {
       this.effects.puff(this.tmpA.copy(d.pos).setY(d.pos.y + 0.4));
       this.audio.pop(d.pos);
@@ -361,15 +388,16 @@ export class Game {
       }
       return;
     }
+    // Drug lovec zamahne z lopato.
     const rp = this.remotes.get(e.by);
+    rp?.hunter?.swing();
     const from = new THREE.Vector3(e.ox, e.oy, e.oz);
-    if (rp?.hunter) {
-      rp.group.updateMatrixWorld(true);
-      rp.hunter.muzzle.getWorldPosition(from);
+    if (e.kind !== 'none') {
+      this.effects.spark(to);
+      this.audio.thud(to);
+    } else {
+      this.audio.swoosh(from);
     }
-    this.effects.tracer(from, to);
-    if (e.kind !== 'none') this.effects.spark(to);
-    this.audio.shot(from);
   }
 
   onKill(k: { killer: string | null; victim: string }): void {
@@ -399,49 +427,32 @@ export class Game {
     if (this.localObj) this.localObj.visible = false;
     this.highlight.visible = false;
     this.target = -1;
-    this.scopeToggle = false;
-    this.setScoped(false);
   }
 
-  private switchWeapon(w: WeaponId): void {
-    if (w === this.weapon) return;
-    this.weapon = w;
-    this.net.weapon(w);
-    this.scopeToggle = false;
-    this.setScoped(false);
-    this.reloading = false;
-    this.ammo = w === 'sniper' ? Math.min(this.ammo, WEAPONS.sniper.mag) : this.ammo; // do posnetka strežnika
-    this.nextFireAt = performance.now() + 300;
-    this.localHunter?.setWeapon(w);
-    this.hud.setWeapon(w);
-    this.audio.click();
-    this.hud.showBanner(w === 'sniper' ? '🎯 Ostrostrelka – z merkom 🔭 do 45 m' : '🔫 Pištola – hitra, do 18 m', 1300);
+  /** Vrata sobe lovcev so odprta samo med lovom. */
+  private gatesOpen(): boolean {
+    return this.phase === 'hunting';
   }
 
-  /** Vklopi/izklopi merek (približan pogled, daljši doseg) in o tem obvesti strežnik. */
-  private setScoped(on: boolean): void {
-    if (on === this.scoped) return;
-    this.scoped = on;
-    this.net.scope(on);
-    this.hud.setScope(on);
-    if (on) this.audio.click();
+  /** Ura strežnika (ms) – enaka na vseh napravah, za dvigalo. */
+  private serverClock(): number {
+    return performance.now() + (Number.isNaN(this.clockOffset) ? 0 : this.clockOffset);
   }
 
-  private updateScope(dt: number): void {
-    const allowed =
-      this.role === 'hunter' && this.alive && this.phase === 'hunting' && this.hasSpawn && !this.menuOpen && WEAPONS[this.weapon].scope;
-    if (!allowed) this.scopeToggle = false;
-    this.setScoped(allowed && (this.scopeToggle || this.input.scopeHeld));
-    const fov = this.scoped ? SCOPE_FOV : this.baseFov;
-    if (Math.abs(this.camera.fov - fov) > 0.05) {
-      this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 14);
-      if (Math.abs(this.camera.fov - fov) < 0.1) this.camera.fov = fov;
-      this.camera.updateProjectionMatrix();
-    }
+  /** Ovire za fiziko: statične + vrata (če so zaprta) + ploščad dvigala. */
+  private currentBoxes(): Box[] {
+    const base = boxesFor(this.world, this.gatesOpen());
+    const lift = elevatorBox(this.world, elevatorY(this.world, this.serverClock()));
+    return lift ? [...base, lift] : base;
   }
 
   private nameOf(id: string): string {
-    if (id.startsWith('d')) return '🎭 Vaba';
+    // Vaba: skrivalci vidijo, da je vaba; lovcu med razkrivanjem pokaže ime lastnika (zavaja).
+    if (id.startsWith('d')) {
+      const owner = id.split(':')[1] ?? '';
+      const ownerName = this.room?.players.find((p) => p.id === owner)?.name ?? '?';
+      return this.role === 'hunter' && this.alive ? ownerName : `🎭 Vaba (${ownerName})`;
+    }
     return this.room?.players.find((p) => p.id === id)?.name ?? '?';
   }
 
@@ -449,25 +460,33 @@ export class Game {
     const seeProps = this.role !== 'hunter' || !this.alive;
     for (const rp of this.remotes.map.values()) {
       const isHunter = rp.model === MODEL_HUNTER;
-      const show = rp.alive && (isHunter || seeProps);
+      // Lovci vidijo imena skrivalcev samo med razkrivanjem (takrat tudi skozi stene).
+      const revealProp = !isHunter && this.reveal && this.phase === 'hunting';
+      const show = rp.alive && (isHunter || seeProps || revealProp);
       const h = shapeOf(rp.model).h;
-      rp.setTag(show ? this.nameOf(rp.id) : '', isHunter ? '#ff9a9a' : '#9affc0', h);
+      const color = isHunter ? '#ff9a9a' : revealProp ? '#ffe066' : '#9affc0';
+      rp.setTag(show ? this.nameOf(rp.id) : '', color, h, revealProp);
     }
   }
-
   // ------------------------------------------------------------------ lokalni model
 
   private applyModel(model: number): void {
+    const changed = model !== this.model && this.hasSpawn && this.role === 'prop';
     this.model = model;
     this.rebuildLocal();
     const shape = shapeOf(model);
+    if (changed) {
+      // Pokadi se ob vsaki spremembi (ročni ali samodejni).
+      this.effects.smoke(this.tmpA.set(this.body.x, this.body.y + 0.3, this.body.z), Math.max(0.8, shape.h));
+      this.audio.pop(null);
+    }
     const r = resolveHorizontal(
       this.body.x,
       this.body.z,
       this.body.y,
       shape,
       collisionYaw(model, this.modelYaw),
-      this.world.staticBoxes,
+      this.currentBoxes(),
     );
     if (r.ok) {
       this.body.x = r.x;
@@ -480,7 +499,6 @@ export class Game {
     if (this.localObj) this.scene.remove(this.localObj);
     if (this.model === MODEL_HUNTER) {
       this.localHunter = hunterModel();
-      this.localHunter.setWeapon(this.weapon);
       this.localObj = this.localHunter.group;
     } else {
       this.localHunter = null;
@@ -504,7 +522,6 @@ export class Game {
     this.handleLook();
     this.aimAssist(dt);
     this.handleActions(now);
-    this.updateScope(dt);
     const jump = this.input.consumeJump();
     if (this.isLockedProp() && (jump || this.input.movement().x !== 0 || this.input.movement().y !== 0)) {
       if (now - this.lastLockedHint > 3000) {
@@ -536,8 +553,12 @@ export class Game {
     this.handleFire(now);
     this.sendState(now);
     this.effects.update(dt);
+    this.updateWorldParts();
     this.updateHud(now);
     this.audio.setListener(this.camera.position, this.fwd);
+    // Samo za avtomatske teste (?debug&fps=N): omejitev izrisa, da programsko upodabljanje ne zaduši brskalnika.
+    if (MIN_RENDER_MS > 0 && now - this.lastRender < MIN_RENDER_MS) return;
+    this.lastRender = now;
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -563,6 +584,23 @@ export class Game {
     }
   }
 
+  /** Vrata (odprta med lovom, z drsenjem navzgor) in ploščad dvigala. */
+  private updateWorldParts(): void {
+    const view = this.worldView;
+    if (!view) return;
+    if (view.gates) {
+      const target = this.gatesOpen() ? 3.2 : 0;
+      const g = view.gates;
+      g.position.y += (target - g.position.y) * Math.min(1, this.frameDt * 3);
+      g.visible = g.position.y < 3.1;
+      g.updateMatrix();
+    }
+    if (view.elevator) {
+      view.elevator.position.y = elevatorY(this.world, this.serverClock());
+      view.elevator.updateMatrix();
+    }
+  }
+
   private canMove(): boolean {
     return (
       this.running &&
@@ -571,12 +609,13 @@ export class Game {
       this.alive &&
       this.role !== 'spectator' &&
       IN_ROUND.has(this.phase) &&
-      !(this.role === 'hunter' && this.phase === 'hiding')
+      // Lovci med skrivanjem stojijo – razen na mapi s sobo lovcev (tam hodijo po zaprti sobi).
+      !(this.role === 'hunter' && this.phase === 'hiding' && !this.world.map.gates)
     );
   }
 
   private handleLook(): void {
-    const sens = this.settings.sensitivity * (this.scoped ? SCOPE_SENS_FACTOR : 1);
+    const sens = this.settings.sensitivity;
     const inv = this.settings.invertY ? -1 : 1;
     const dx = (this.input.lookTouchX * 0.0055 + this.input.lookMouseX * 0.0022) * sens;
     const dy = (this.input.lookTouchY * 0.0055 + this.input.lookMouseY * 0.0022) * sens * inv;
@@ -602,13 +641,13 @@ export class Game {
     const mv = locked ? { x: 0, y: 0 } : this.input.movement();
     const s = Math.sin(this.camYaw);
     const c = Math.cos(this.camYaw);
-    const speed = MOVE_SPEED * (this.scoped ? SCOPE_SPEED_FACTOR : 1);
+    const speed = MOVE_SPEED;
     // naprej = (-sin, -cos), desno = (cos, -sin)
     const vx = (c * mv.x - s * mv.y) * speed;
     const vz = (-s * mv.x - c * mv.y) * speed;
     const shape = shapeOf(this.model);
     const cy = collisionYaw(this.model, this.modelYaw);
-    const boxes = this.world.staticBoxes;
+    const boxes = this.currentBoxes();
     stepBody(this.body, shape, cy, vx, vz, jump && !locked, PHYSICS_DT, boxes);
 
     // Zaklenjenega skrivalca drugi ne morejo odriniti.
@@ -639,7 +678,7 @@ export class Game {
     const desired = isProp && this.locked ? this.modelYaw : this.camYaw;
     if (transformed) {
       if (this.canMoveOrRotate()) {
-        this.modelYaw = tryRotate(this.body, shapeOf(this.model), this.modelYaw, desired, this.world.staticBoxes);
+        this.modelYaw = tryRotate(this.body, shapeOf(this.model), this.modelYaw, desired, this.currentBoxes());
       }
     } else {
       this.modelYaw = desired;
@@ -697,7 +736,7 @@ export class Game {
     const obj = this.localObj;
     if (!obj) return;
     // Skozi merek gleda lovec iz svojih oči – svojega modela takrat ne rišemo.
-    obj.visible = this.running && this.alive && this.hasSpawn && this.role !== 'spectator' && !this.scoped;
+    obj.visible = this.running && this.alive && this.hasSpawn && this.role !== 'spectator';
     obj.position.set(this.body.x, this.body.y, this.body.z);
     obj.rotation.y = this.modelYaw;
     if (this.localHunter) {
@@ -772,10 +811,7 @@ export class Game {
       const shape = shapeOf(this.model);
       px = this.body.x;
       pz = this.body.z;
-      if (this.model === MODEL_HUNTER && this.scoped) {
-        py = this.body.y + HUNTER_EYE + 0.05;
-        dist = 0;
-      } else if (this.model === MODEL_HUNTER) {
+      if (this.model === MODEL_HUNTER) {
         py = this.body.y + HUNTER_EYE + 0.15;
         dist = 2.6;
         shoulder = 0.45;
@@ -799,7 +835,8 @@ export class Game {
     if (len > 1e-4) {
       const ray: Ray = { ox: px, oy: py, oz: pz, dx: dx / len, dy: dy / len, dz: dz / len };
       let best = len;
-      for (const b of this.world.wallBoxes) {
+      const camBoxes = this.gatesOpen() ? this.world.wallBoxes : [...this.world.wallBoxes, ...this.world.closedBoxes.slice(this.world.staticBoxes.length)];
+      for (const b of camBoxes) {
         const t = rayAABB(ray, b, best);
         if (t !== null && t < best) best = t;
       }
@@ -859,29 +896,14 @@ export class Game {
     if (inp.consume('transform') && isProp) this.tryTransform(now);
     if (inp.consume('decoy') && isProp) this.placeDecoy();
     if (inp.consume('radar') && this.role === 'hunter' && this.alive) {
-      if (this.phase !== 'hunting') this.hooks.toast('Radar deluje med lovom.');
+      if (this.room?.settings.radar === false) this.hooks.toast('Radar je v tej igri izklopljen.');
+      else if (this.phase !== 'hunting') this.hooks.toast('Radar deluje med lovom.');
       else if (now < this.radarReadyAt) {
         this.hooks.toast('Radar bo pripravljen čez ' + Math.ceil((this.radarReadyAt - now) / 1000) + ' s.');
       } else {
         this.radarReadyAt = now + RADAR_COOLDOWN_MS;
         this.net.radar();
       }
-    }
-    if (inp.consume('scope') && this.role === 'hunter' && this.alive) {
-      if (this.phase !== 'hunting') this.hooks.toast('Merek lahko uporabiš med lovom.');
-      else if (!WEAPONS[this.weapon].scope) this.hooks.toast('Merek ima samo ostrostrelka 🎯 – zamenjaj orožje.');
-      else this.scopeToggle = !this.scopeToggle;
-    }
-    const w1 = inp.consume('weapon1');
-    const w2 = inp.consume('weapon2');
-    const wt = inp.consume('weapon');
-    if ((w1 || w2 || wt) && this.role === 'hunter' && this.alive) {
-      const next: WeaponId = w1 ? 'pistol' : w2 ? 'sniper' : this.weapon === 'pistol' ? 'sniper' : 'pistol';
-      this.switchWeapon(next);
-    }
-    if (inp.consume('reload') && this.role === 'hunter' && this.alive && !this.reloading && this.ammo < WEAPONS[this.weapon].mag) {
-      this.net.reload();
-      this.reloading = true;
     }
   }
 
@@ -906,7 +928,7 @@ export class Game {
     });
   }
 
-  onRadar(r: { count: number; range: number; x: number; y: number; z: number }): void {
+  onRadar(r: RadarResult): void {
     this.effects.ring(this.tmpA.set(r.x, r.y + 0.1, r.z), r.range);
     this.audio.beep(true);
     const n = r.count;
@@ -920,7 +942,17 @@ export class Game {
             : n <= 4
               ? 'so ' + n + ' skrivalci'
               : 'je ' + n + ' skrivalcev';
-    this.hud.showBanner('📡 Radar: v ' + r.range + ' m ' + text, 2500);
+    // Namig o smeri najbližjega (glede na smer pogleda v tem trenutku).
+    let dir = '';
+    if (r.blips.length > 0) {
+      const nearest = r.blips.reduce((m, b) => (b.d < m.d ? b : m));
+      const clockwise = -(nearest.a - this.camYaw);
+      const sector = ((Math.round(clockwise / (Math.PI / 4)) % 8) + 8) % 8;
+      const names = ['naravnost', 'spredaj desno', 'desno', 'zadaj desno', 'za tabo', 'zadaj levo', 'levo', 'spredaj levo'];
+      dir = names[sector]!;
+    }
+    this.hooks.toast('📡 Radar: v ' + r.range + ' m ' + text + (dir ? ' – najbližji: ' + dir : ''));
+    this.radarView.show(r.blips, n === 0 ? 'Nikogar v bližini' : '📡 ' + n + (dir ? ' · ' + dir : ''));
   }
 
   onDecoyHit(d: { id: string; owner: string; by: string }): void {
@@ -963,11 +995,7 @@ export class Game {
         const t = performance.now();
         this.transformReadyAt = t + TRANSFORM_COOLDOWN_MS;
         this.modelLockUntil = t + 600;
-        if (res.model !== this.model) {
-          this.applyModel(res.model);
-          this.audio.pop(null);
-          this.effects.puff(this.tmpA.set(this.body.x, this.body.y + 0.3, this.body.z));
-        }
+        if (res.model !== this.model) this.applyModel(res.model);
       } else {
         this.hooks.toast(res.error);
       }
@@ -978,19 +1006,12 @@ export class Game {
     const tap = this.input.consumeFire();
     if (!(this.input.fireHeld || tap) || this.menuOpen) return;
     if (this.role !== 'hunter' || !this.alive || this.phase !== 'hunting' || !this.hasSpawn) return;
-    if (this.reloading || now < this.nextFireAt) return;
-    if (this.ammo <= 0) {
-      this.audio.empty();
-      this.nextFireAt = now + 400;
-      this.net.reload();
-      this.reloading = true;
-      return;
-    }
-    this.nextFireAt = now + WEAPONS[this.weapon].intervalMs;
-    this.lastShotAt = now;
-    this.ammo--;
+    if (now < this.nextFireAt) return;
+    this.nextFireAt = now + SHOVEL_INTERVAL_MS;
+    this.swingCount++;
     const ray = this.aimRay();
     this.net.shoot({ ox: ray.ox, oy: ray.oy, oz: ray.oz, dx: ray.dx, dy: ray.dy, dz: ray.dz });
+    this.localHunter?.swing();
 
     // Takojšen lokalni učinek z isto logiko kot strežnik (ta ima zadnjo besedo o zadetku).
     const start = shotRayFromCamera(
@@ -1003,31 +1024,22 @@ export class Game {
       if (!rp.alive || rp.model === MODEL_HUNTER || Number.isNaN(rp.model)) continue;
       targets.push({ id: rp.id, x: rp.pos.x, y: rp.pos.y, z: rp.pos.z, yaw: rp.yaw, model: rp.model });
     }
-    const wd = WEAPONS[this.weapon];
-    const range = this.scoped && wd.scope ? wd.scopedRange : wd.range;
-    const shot = resolveShot(this.world, start, range, targets, this.marked);
-    const t = shot.t;
-    // Namig: brez merka je cilj predaleč.
-    if (!this.scoped && shot.kind === 'none' && now - this.lastRangeHint > 4000) {
-      const far = resolveShot(this.world, start, WEAPONS.sniper.scopedRange, targets, this.marked);
-      if (far.kind !== 'none') {
+    const shot = resolveSwing(this.world, start, this.body, targets, this.marked);
+    // Namig: cilj je predaleč za lopato.
+    if (shot.kind === 'none' && now - this.lastRangeHint > 4000) {
+      const far = resolveShot(this.world, start, 12, targets, this.marked);
+      if (far.kind === 'player' || far.kind === 'prop') {
         this.lastRangeHint = now;
-        this.hooks.toast(`Predaleč (več kot ${range} m)! Vzemi ostrostrelko 🎯 in merek 🔭`);
+        this.hooks.toast('Predaleč – z lopato moraš priti čisto blizu!');
       }
     }
-    const to = this.tmpB.set(start.ox + start.dx * t, start.oy + start.dy * t, start.oz + start.dz * t);
-    const from = this.tmpA;
-    if (this.localHunter && this.localObj && !this.scoped) {
-      this.localObj.updateMatrixWorld(true);
-      this.localHunter.muzzle.getWorldPosition(from);
+    if (shot.kind !== 'none') {
+      const t = shot.t;
+      this.effects.spark(this.tmpB.set(start.ox + start.dx * t, start.oy + start.dy * t, start.oz + start.dz * t));
+      this.audio.hit();
     } else {
-      // Skozi merek: sled iz točke tik pod očmi.
-      from.set(start.ox, start.oy - 0.25, start.oz);
+      this.audio.swoosh(null);
     }
-    this.effects.muzzle(from);
-    this.effects.tracer(from.clone(), to.clone());
-    if (t < range) this.effects.spark(to.clone());
-    this.audio.shot(null);
   }
 
   private sendState(now: number): void {
@@ -1058,19 +1070,24 @@ export class Game {
 
     const hunterActive = this.role === 'hunter' && this.alive;
     const propActive = this.role === 'prop' && this.alive;
-    hud.setAmmo(hunterActive && this.phase !== 'roundEnd', this.ammo, this.reloading, this.scoped, this.weapon);
+    hud.setTool(hunterActive && this.phase !== 'roundEnd');
     hud.setCrosshair(hunterActive ? 'cross' : propActive ? 'dot' : 'none', this.target >= 0);
     hud.setTarget(propActive ? this.targetText : null);
     // Med skrivanjem skrivalcu pokažemo, v katere predmete se lahko spremeni (če je izbira omejena).
     const shapes = this.shapeList();
-    if (propActive && shapes && (this.phase === 'hiding' || this.phase === 'hunting')) {
-      const next = this.nextShape(shapes);
-      const cur = shapes.indexOf(this.model);
-      hud.setTransformList(
-        this.phase === 'hiding'
-          ? `Oblike: ${shapes.map((t) => PROPS[t]?.name ?? '?').join(' · ')} — Zamenjaj → ${PROPS[next]?.name ?? '?'}`
-          : `${cur >= 0 ? `${cur + 1}/${shapes.length}` : '–'} · Zamenjaj → ${PROPS[next]?.name ?? '?'}`,
-      );
+    const autoText = this.autoShapeIn >= 0 ? `⏳ Samodejna sprememba čez ${Math.ceil(this.autoShapeIn / 1000)} s` : '';
+    if (propActive && (this.phase === 'hiding' || this.phase === 'hunting')) {
+      if (shapes) {
+        const next = this.nextShape(shapes);
+        const cur = shapes.indexOf(this.model);
+        hud.setTransformList(
+          this.phase === 'hiding'
+            ? `Oblike: ${shapes.map((t) => PROPS[t]?.name ?? '?').join(' · ')} — Zamenjaj → ${PROPS[next]?.name ?? '?'} · ${autoText}`
+            : `${cur >= 0 ? `${cur + 1}/${shapes.length}` : '–'} · Zamenjaj → ${PROPS[next]?.name ?? '?'} · ${autoText}`,
+        );
+      } else {
+        hud.setTransformList(autoText || null);
+      }
     } else {
       hud.setTransformList(null);
     }
@@ -1093,7 +1110,8 @@ export class Game {
       }
     }
 
-    const blind = this.role === 'hunter' && this.alive && this.phase === 'hiding';
+    // Brez sobe lovcev so lovci med skrivanjem zatemnjeni; s sobo čakajo v njej.
+    const blind = this.role === 'hunter' && this.alive && this.phase === 'hiding' && !this.world.map.gates;
     hud.setBlind(blind, msLeft);
 
     if (this.spectating() && IN_ROUND.has(this.phase)) {
@@ -1112,7 +1130,12 @@ export class Game {
           : propActive
             ? 'prop'
             : 'none';
-    hud.setControls(mode, this.locked, (this.target >= 0 || this.shapeList() !== null) && now >= this.transformReadyAt);
+    hud.setControls(
+      mode,
+      this.locked,
+      (this.target >= 0 || this.shapeList() !== null) && now >= this.transformReadyAt,
+      this.room?.settings.radar !== false,
+    );
 
     // Odštevanje zadnjih 5 sekund skrivanja
     if (this.phase === 'hiding') {

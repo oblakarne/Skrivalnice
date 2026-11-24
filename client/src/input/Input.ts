@@ -1,6 +1,6 @@
 // Skupno stanje vnosa za dotik in tipkovnico/miško.
 
-export type InputAction = 'transform' | 'lock' | 'reload' | 'nextSpec' | 'menu' | 'scope' | 'weapon' | 'weapon1' | 'weapon2' | 'decoy' | 'radar';
+export type InputAction = 'transform' | 'lock' | 'reload' | 'nextSpec' | 'menu' | 'decoy' | 'radar';
 
 export class InputState {
   /** -1..1 (desno pozitivno) */
@@ -14,8 +14,6 @@ export class InputState {
   lookMouseX = 0;
   lookMouseY = 0;
   fireHeld = false;
-  /** Desni gumb miške drži merek. */
-  scopeHeld = false;
   /** Zapah: kratek dotik/klik vedno sproži vsaj en strel (tudi pri nizkem FPS). */
   private fireTap = false;
   private jumpQueued = false;
@@ -76,7 +74,6 @@ export class InputState {
     this.lookMouseX = 0;
     this.lookMouseY = 0;
     this.fireHeld = false;
-    this.scopeHeld = false;
     this.fireTap = false;
     this.jumpQueued = false;
     this.actions.clear();

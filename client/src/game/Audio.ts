@@ -142,6 +142,35 @@ export class GameAudio {
     src.stop(t + 0.2);
   }
 
+  /** Zamah z lopato po zraku. */
+  swoosh(pos: Vec | null): void {
+    const ctx = this.ctx;
+    const dest = this.out(pos);
+    if (!ctx || !dest || !this.noise) return;
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.setValueAtTime(600, t);
+    f.frequency.exponentialRampToValueAtTime(2200, t + 0.18);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.exponentialRampToValueAtTime(0.5, t + 0.08);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+    src.connect(f).connect(g).connect(dest);
+    src.start(t);
+    src.stop(t + 0.25);
+  }
+
+  /** Udarec lopate ob predmet. */
+  thud(pos: Vec | null): void {
+    this.tone('triangle', [
+      [0, 180],
+      [0.12, 70],
+    ], 0.16, 0.5, pos);
+  }
+
   hit(): void {
     this.tone('square', [[0, 1200]], 0.07, 0.18);
   }

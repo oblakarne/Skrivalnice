@@ -249,30 +249,6 @@ export async function createGameServer(options: GameServerOptions): Promise<Runn
     );
 
     socket.on(
-      'reload',
-      safe(() => {
-        const c = current();
-        if (c) c.room.handleReload(c.player);
-      }),
-    );
-
-    socket.on(
-      'scope',
-      safe((on: unknown) => {
-        const c = current();
-        if (c) c.room.handleScope(c.player, on);
-      }),
-    );
-
-    socket.on(
-      'weapon',
-      safe((w: unknown) => {
-        const c = current();
-        if (c) c.room.handleWeapon(c.player, w);
-      }),
-    );
-
-    socket.on(
       'shape',
       safe((type: unknown, ack: unknown) => {
         const reply = toAck<TransformResult>(ack);

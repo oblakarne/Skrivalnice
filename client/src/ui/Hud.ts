@@ -1,4 +1,4 @@
-import { WEAPONS, type Phase, type Role, type WeaponId } from '../../../shared/src/index';
+import { SHOVEL_RANGE, type Phase, type Role } from '../../../shared/src/index';
 import { $, el, formatTime, show } from './dom';
 
 export type ControlMode = 'hunter' | 'prop' | 'spectate' | 'none';
@@ -24,7 +24,6 @@ export class Hud {
   private readonly touch = $('touch-controls');
   private readonly desktopHelp = $('desktop-help');
   private readonly lockBadge = $('lock-badge');
-  private readonly scopeOverlay = $('scope-overlay');
   private readonly transformList = $('transform-list');
   private bannerTimer = 0;
   private hitTimer = 0;
@@ -70,25 +69,11 @@ export class Hud {
     }
   }
 
-  setAmmo(visible: boolean, ammo: number, reloading: boolean, scoped: boolean, weapon: WeaponId): void {
+  /** Orodje lovca (lopata) spodaj na sredini. */
+  setTool(visible: boolean): void {
     show(this.ammo, visible);
-    if (!visible) return;
-    const w = WEAPONS[weapon];
-    const icon = weapon === 'sniper' ? '🎯' : '🔫';
-    const range = scoped && w.scope ? `🔭 ${w.scopedRange} m` : `${w.range} m`;
-    const t = reloading ? `${icon} Polnim … · ${range}` : `${icon} ${ammo} / ${w.mag} · ${range}`;
-    if (t !== this.last.ammo) {
-      this.last.ammo = t;
-      this.ammo.textContent = t;
-    }
-  }
-
-  setWeapon(w: WeaponId): void {
-    const b = $('btn-weapon');
-    // Gumb pokaže orožje, na katerega preklopiš.
-    b.firstChild!.textContent = w === 'pistol' ? '🎯' : '🔫';
-    b.lastElementChild!.textContent = w === 'pistol' ? 'Ostrostr.' : 'Pištola';
-    $('btn-scope').classList.toggle('disabled', w !== 'sniper');
+    const t = `⛏ Lopata · doseg ${SHOVEL_RANGE} m`;
+    if (visible && this.ammo.textContent !== t) this.ammo.textContent = t;
   }
 
   setDecoys(n: number, enabled: boolean): void {
@@ -110,10 +95,6 @@ export class Hud {
     if (s.textContent !== text) s.textContent = text;
   }
 
-  setScope(on: boolean): void {
-    show(this.scopeOverlay, on);
-    $('btn-scope').classList.toggle('active', on);
-  }
 
   /** Seznam predmetov, v katere se je mogoče spremeniti (null = skrij). */
   setTransformList(text: string | null): void {
@@ -185,14 +166,14 @@ export class Hud {
     }
   }
 
-  setControls(mode: ControlMode, locked: boolean, canTransform: boolean): void {
-    const key = `${mode}|${locked}|${canTransform}`;
+  setControls(mode: ControlMode, locked: boolean, canTransform: boolean, radarOn = true): void {
+    const key = `${mode}|${locked}|${canTransform}|${radarOn}`;
     if (key === this.last.mode) return;
     this.last.mode = key;
     show(this.touch, this.touchEnabled && mode !== 'none');
     for (const b of this.touch.querySelectorAll<HTMLElement>('.tbtn')) {
       const roles = (b.dataset.for ?? '').split(' ');
-      show(b, roles.includes(mode));
+      show(b, roles.includes(mode) && (radarOn || b.id !== 'btn-radar'));
     }
     const lock = $('btn-lock');
     lock.classList.toggle('active', locked);
@@ -207,9 +188,9 @@ export class Hud {
       show(this.desktopHelp, mode !== 'none');
       this.desktopHelp.textContent =
         mode === 'hunter'
-          ? 'WASD hoja · klik strel · 1 pištola · 2 ostrostrelka (X menjava) · desni klik / Z merek · R polni · Esc meni'
+          ? `WASD hoja · klik zamah z lopato · ${radarOn ? 'F radar · ' : ''}presledek skok · Esc meni`
           : mode === 'prop'
-            ? `WASD hoja · E spremeni se · Q ${locked ? 'odkleni' : 'zakleni (stoj pri miru)'} · presledek skok · Esc meni`
+            ? `WASD hoja · E spremeni se · Q ${locked ? 'odkleni' : 'zakleni (stoj pri miru)'} · G vaba · presledek skok · Esc meni`
             : mode === 'spectate'
               ? 'Miška: pogled · N: naslednji igralec · Esc meni'
               : '';

@@ -1,4 +1,4 @@
-import type { RoomInfo, RoomSettings, ShotEvent, Snapshot } from './types';
+import type { RadarResult, RoomInfo, RoomSettings, ShotEvent, Snapshot } from './types';
 
 /** Stanje, ki ga odjemalec pošilja 20x na sekundo. */
 export interface StateMsg {
@@ -41,12 +41,8 @@ export interface ClientToServerEvents {
   backToLobby: () => void;
   state: (s: StateMsg) => void;
   transform: (propIndex: number, ack: (r: TransformResult) => void) => void;
+  /** Zamah z lopato (žarek iz kamere). */
   shoot: (s: ShootMsg) => void;
-  reload: () => void;
-  /** Lovec vklopi/izklopi merek (daljši doseg strela). */
-  scope: (on: boolean) => void;
-  /** Lovec zamenja orožje. */
-  weapon: (w: 'pistol' | 'sniper') => void;
   /** Skrivalec se spremeni v obliko iz nabora mape (brez merjenja; npr. Construction). */
   shape: (type: number, ack: (r: TransformResult) => void) => void;
   /** Skrivalec pusti vabo (lažno kopijo sebe). */
@@ -65,7 +61,7 @@ export interface ServerToClientEvents {
   kill: (k: { killer: string | null; victim: string }) => void;
   toast: (msg: string) => void;
   /** Rezultat radarja: število pravih skrivalcev v dosegu. */
-  radar: (r: { count: number; range: number; x: number; y: number; z: number }) => void;
+  radar: (r: RadarResult) => void;
   /** Lovec je zadel vabo (vsem – za učinek in sporočilo). */
   decoyHit: (d: { id: string; owner: string; by: string }) => void;
   kicked: (reason: string) => void;

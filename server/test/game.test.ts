@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  WEAPONS,
+  SHOVEL_INTERVAL_MS,
+  SHOVEL_DAMAGE,
   HP_MAX,
   HUNTER_EYE,
   PROPS,
@@ -13,6 +14,7 @@ import {
   canTransformInto,
   getWorld,
   WRONG_PROP_PENALTY,
+  type RadarResult,
 } from '../../shared/src/index';
 import { createGameServer, type RunningServer } from '../src/server';
 import { Bot, sleep, waitFor, walk, walkPhysics } from './helpers';
@@ -37,6 +39,17 @@ afterEach(async () => {
   if (server) await server.close();
   server = null;
 });
+
+/** Zamah z lopato iz glave lovca proti središču cilja. */
+async function swingAt(
+  hunter: Bot,
+  h: { x: number; y: number; z: number },
+  t: { x: number; y: number; z: number; model: number },
+): Promise<void> {
+  const head = { x: h.x, y: h.y + HUNTER_EYE, z: h.z };
+  const c = { x: t.x, y: t.y + shapeOf(t.model).h / 2, z: t.z };
+  hunter.socket.emit('shoot', { ox: head.x, oy: head.y, oz: head.z, dx: c.x - head.x, dy: c.y - head.y, dz: c.z - head.z });
+}
 
 function nearestProp(x: number, z: number, world = WORLD): number {
   let best = -1;
@@ -147,8 +160,8 @@ describe('ponovna povezava', () => {
 });
 
 describe('igra', () => {
-  it('odigra celo igro: skrivanje, sprememba, strel, ulov, kazen, konec', { timeout: 60000 }, async () => {
-    const ts = 0.04;
+  it('odigra celo igro: skrivanje, sprememba, udarci z lopato, ulov, kazen, konec', { timeout: 90000 }, async () => {
+    const ts = 0.1;
     const url = await start(ts);
     const a = bot(url);
     const b = bot(url);
@@ -156,7 +169,7 @@ describe('igra', () => {
     const code = ra.ok ? ra.code : '';
     await b.join('Bor', code);
     await waitFor(() => a.room?.players.length === 2, 2000, 'dva');
-    a.socket.emit('updateSettings', { rounds: 3, hideTime: 20, huntTime: 120, penalty: true });
+    a.socket.emit('updateSettings', { rounds: 3, hideTime: 20, huntTime: 180, penalty: true });
     await waitFor(() => a.room!.settings.rounds === 3, 2000, 'nastavitve');
 
     expect((await a.start()).ok).toBe(true);
@@ -198,22 +211,21 @@ describe('igra', () => {
     const hs = room.debugPlayer(hunter.playerId)!;
     expect(hs.z).toBeCloseTo(11, 1);
 
-    // Ostrostrelka z merkom (skrivalec je lahko dlje kot 18 m): 2 zadetka po 50.
-    hunter.socket.emit('weapon', 'sniper');
-    hunter.socket.emit('scope', true);
-    await sleep(350);
-    const target = room.debugPlayer(prop.playerId)!;
-    const shape = shapeOf(target.model);
-    const head = { x: hs.x, y: hs.y + HUNTER_EYE, z: hs.z };
-    const aim = { x: target.x - head.x, y: target.y + shape.h / 2 - head.y, z: target.z - head.z };
-    for (let i = 0; i < 2; i++) {
-      hunter.socket.emit('shoot', { ox: head.x, oy: head.y, oz: head.z, dx: aim.x, dy: aim.y, dz: aim.z });
-      await sleep(WEAPONS.sniper.intervalMs + 60);
+    // Lovec pride do skrivalca in ga udarja z lopato (2 x 50), dokler ga ne ujame.
+    // Pred vsakim udarcem se znova približa (skrivalec se lahko samodejno spremeni in premakne).
+    for (let i = 0; i < 6 && hunter.kills.length === 0; i++) {
+      const tp = room.debugPlayer(prop.playerId)!;
+      const hp = room.debugPlayer(hunter.playerId)!;
+      if (Math.hypot(tp.x - hp.x, tp.z - hp.z) > 1.8) await walk(hunter, tp.x > 5.2 ? tp.x - 1.4 : tp.x + 1.4, 11);
+      await swingAt(hunter, room.debugPlayer(hunter.playerId)!, room.debugPlayer(prop.playerId)!);
+      await sleep(SHOVEL_INTERVAL_MS + 60);
       // Po prvem zadetku je skrivalec označen za pomoč pri merjenju.
-      if (i === 0) expect(room.debugPlayer(hunter.playerId)!.marked.has(prop.playerId)).toBe(true);
+      if (hunter.shots.some((s) => s.kind === 'player') && hunter.kills.length === 0 && a.room?.phase === 'hunting' && a.room.round === 1) {
+        expect(room.debugPlayer(hunter.playerId)!.marked.has(prop.playerId)).toBe(true);
+      }
     }
     await waitFor(() => hunter.kills.length === 1, 2000, 'ulov');
-    expect(hunter.shots.filter((s) => s.kind === 'player').length).toBe(2);
+    expect(hunter.shots.filter((s) => s.kind === 'player').length).toBe(2); // 2 x 50 = 100
     expect(hunter.kills[0]).toEqual({ killer: hunter.playerId, victim: prop.playerId });
     await waitFor(() => a.history.some((h) => h.phase === 'roundEnd' && h.round === 1), 3000, 'konec runde');
     expect(a.history.find((h) => h.phase === 'roundEnd' && h.round === 1)!.winner).toBe('hunters');
@@ -225,7 +237,8 @@ describe('igra', () => {
     expect(prop.role()).toBe('hunter');
     expect(hunter.role()).toBe('prop');
     await waitFor(() => a.room?.phase === 'hunting' && a.room.round === 2, 3000, 'lov 2');
-    // Novi lovec strelja v delovno mizo v garaži -> kazen.
+    // Novi lovec udari delovno mizo v garaži -> kazen.
+    await walk(prop, 5.0, 1.6);
     const h2 = room.debugPlayer(prop.playerId)!;
     const benchIdx = WORLD.map.props.findIndex((p) => PROPS[p.type]!.id === 'delovnamiza');
     const bench = WORLD.map.props[benchIdx]!;
@@ -240,16 +253,15 @@ describe('igra', () => {
     });
     await waitFor(() => room.debugPlayer(prop.playerId)!.hp === HP_MAX - WRONG_PROP_PENALTY, 2000, 'kazen');
     await waitFor(() => prop.snap?.you?.hp === HP_MAX - WRONG_PROP_PENALTY, 2000, 'hp v snapshotu');
-    expect(prop.snap!.you!.ammo).toBe(11);
 
     // Runda 2 se izteče -> zmagajo skrivalci, skrivalec dobi točke za preživetje.
-    await waitFor(() => a.room?.phase === 'roundEnd' && a.room.round === 2, 8000, 'konec runde 2');
-    expect(a.room!.lastWinner).toBe('props');
+    await waitFor(() => a.history.some((h) => h.phase === 'roundEnd' && h.round === 2), 30000, 'konec runde 2');
+    expect(a.history.find((h) => h.phase === 'roundEnd' && h.round === 2)!.winner).toBe('props');
     const survivor = a.room!.players.find((p) => p.id === hunter.playerId)!;
     expect(survivor.score).toBeGreaterThan(SCORE_KILL + 50);
 
     // Runda 3 in konec igre.
-    await waitFor(() => a.room?.phase === 'gameEnd', 12000, 'konec igre');
+    await waitFor(() => a.room?.phase === 'gameEnd', 35000, 'konec igre');
     expect(a.room!.round).toBe(3);
     b.socket.emit('backToLobby');
     await sleep(150);
@@ -364,7 +376,7 @@ describe('igra', () => {
     const opekaType = construction.map.props.find((pl) => PROPS[pl.type]!.id === 'opeka')!.type;
     const tooSoon = await prop.socket.timeout(3000).emitWithAck('shape', opekaType);
     expect(tooSoon).toEqual({ ok: false, error: 'Počakaj trenutek.' });
-    await sleep(TRANSFORM_COOLDOWN_MS + 100);
+    await sleep(TRANSFORM_COOLDOWN_MS * 0.1 + 100);
     const opeka = construction.map.props.find((pl) => PROPS[pl.type]!.id === 'opeka')!.type;
     const shaped = await prop.socket.timeout(3000).emitWithAck('shape', opeka);
     expect(shaped.ok === true || shaped.error === 'Tu ni prostora.').toBe(true);
@@ -406,9 +418,8 @@ describe('igra', () => {
     const prop = hunter === a ? b : a;
     const room = server!.manager.get(code)!;
 
-    // Duh ne more postaviti vabe; po spremembi lahko dve.
-    expect((await prop.socket.timeout(3000).emitWithAck('decoy')).ok).toBe(false);
-    expect((await prop.transform(nearestProp(prop.pos.x, prop.pos.z))).ok).toBe(true);
+    // Skrivalec je že ob začetku predmet (ne bel duh) – vabi lahko postavi takoj.
+    expect(room.debugPlayer(prop.playerId)!.model).toBeGreaterThan(0);
     for (let i = 0; i < DECOYS_PER_ROUND; i++) expect((await prop.socket.timeout(3000).emitWithAck('decoy')).ok).toBe(true);
     expect((await prop.socket.timeout(3000).emitWithAck('decoy')).ok).toBe(false);
     expect(room.decoys.length).toBe(DECOYS_PER_ROUND);
@@ -417,30 +428,38 @@ describe('igra', () => {
 
     await waitFor(() => a.room?.phase === 'hunting', 5000, 'lov');
     // Radar: lovec v garaži -> skrivalcev v 12 m ni (vab ne šteje).
-    const radar = new Promise<{ count: number }>((res) => hunter.socket.once('radar', res));
+    const radar = new Promise<RadarResult>((res) => hunter.socket.once('radar', res));
     hunter.socket.emit('radar');
     const r = await radar;
     const hs = room.debugPlayer(hunter.playerId)!;
     const ps = room.debugPlayer(prop.playerId)!;
     expect(r.count).toBe(Math.hypot(ps.x - hs.x, ps.z - hs.z) <= 12 ? 1 : 0);
+    // Namig o smeri: ena pika na skrivalca, smer zaokrožena na 30 stopinj.
+    expect(r.blips.length).toBe(r.count);
+    for (const bl of r.blips) {
+      expect(bl.d).toBeGreaterThan(0);
+      expect(bl.d).toBeLessThanOrEqual(1);
+      const trueA = Math.atan2(-(ps.x - hs.x), -(ps.z - hs.z));
+      const diff = Math.abs(Math.atan2(Math.sin(bl.a - trueA), Math.cos(bl.a - trueA)));
+      expect(diff).toBeLessThanOrEqual(Math.PI / 12 + 1e-3);
+    }
     let second = false;
     hunter.socket.once('radar', () => (second = true));
     hunter.socket.emit('radar');
     await sleep(300);
     expect(second).toBe(false); // radar mora počakati
 
-    // Lovec gre na hodnik in z ostrostrelko ustreli vabo.
+    // Skrivalec se odmakne od vab (stran od strani, s katere pride lovec).
+    const d = room.decoys[0]!;
+    const xs = d.x;
+    const away = xs <= 5.2 ? xs - 2 : xs + 3 <= 33 ? xs + 3 : xs - 3;
+    await walk(prop, away, 11);
+    // Lovec gre na hodnik do vabe in jo udari z lopato.
     await walk(hunter, 5.2, 7.5);
     await walk(hunter, 5.2, 11);
-    const h2 = room.debugPlayer(hunter.playerId)!;
-    const d = room.decoys[0]!;
-    const head = { x: h2.x, y: h2.y + HUNTER_EYE, z: h2.z };
-    const hgt = shapeOf(d.model).h;
-    hunter.socket.emit('weapon', 'sniper');
-    hunter.socket.emit('scope', true);
-    await sleep(400);
+    await walk(hunter, xs <= 5.2 ? xs + 1.4 : xs - 1.4, 11);
     const scoreBefore = room.debugPlayer(prop.playerId)!.score;
-    hunter.socket.emit('shoot', { ox: head.x, oy: head.y, oz: head.z, dx: d.x - head.x, dy: d.y + hgt / 2 - head.y, dz: d.z - head.z });
+    await swingAt(hunter, room.debugPlayer(hunter.playerId)!, d);
     await waitFor(() => !d.alive, 2000, 'vaba zadeta');
     expect(room.debugPlayer(hunter.playerId)!.hp).toBe(HP_MAX - WRONG_PROP_PENALTY);
     expect(room.debugPlayer(prop.playerId)!.hp).toBe(HP_MAX);
@@ -448,7 +467,7 @@ describe('igra', () => {
     expect(hunter.shots.at(-1)!.kind).toBe('prop');
   });
 
-  it('pištola ne seže dlje od 18 m, ostrostrelka z merkom pa', { timeout: 40000 }, async () => {
+  it('lopata seže samo blizu: od daleč zgreši, od blizu zadene', { timeout: 40000 }, async () => {
     const url = await start(0.1);
     const a = bot(url);
     const b = bot(url);
@@ -463,27 +482,121 @@ describe('igra', () => {
     const prop = hunter === a ? b : a;
     await waitFor(() => a.room?.phase === 'hunting', 5000, 'lov');
     const room = server!.manager.get(ra.ok ? ra.code : '')!;
-    // Skrivalec gre na začetek hodnika (x 3), lovec 19.5 m stran (x 22.5).
-    await walk(prop, 3, 11, 6);
-    const target = room.debugPlayer(prop.playerId)!;
-    expect(target.x).toBeCloseTo(3, 1);
+    // Skrivalec gre na začetek hodnika (x 2), lovec najprej 5 m stran.
+    await walk(prop, 2, 11, 6);
     await walk(hunter, 5.2, 7.5);
     await walk(hunter, 5.2, 11);
-    await walk(hunter, 22.5, 11);
-    const hs = room.debugPlayer(hunter.playerId)!;
-    const head = { x: hs.x, y: hs.y + HUNTER_EYE, z: hs.z };
-    const aim = { dx: target.x - head.x, dy: target.y + 0.44 - head.y, dz: target.z - head.z };
-    expect(Math.hypot(aim.dx, aim.dz)).toBeGreaterThan(18);
-    hunter.socket.emit('shoot', { ox: head.x, oy: head.y, oz: head.z, ...aim });
-    await waitFor(() => hunter.shots.length === 1, 2000, 'strel brez merka');
+    await walk(hunter, 7.2, 11);
+    await swingAt(hunter, room.debugPlayer(hunter.playerId)!, room.debugPlayer(prop.playerId)!);
+    await waitFor(() => hunter.shots.length === 1, 2000, 'udarec od daleč');
     expect(hunter.shots[0]!.kind).not.toBe('player');
     expect(room.debugPlayer(prop.playerId)!.hp).toBe(HP_MAX);
-    hunter.socket.emit('weapon', 'sniper');
-    hunter.socket.emit('scope', true);
-    await sleep(400);
-    hunter.socket.emit('shoot', { ox: head.x, oy: head.y, oz: head.z, ...aim });
-    await waitFor(() => hunter.shots.length === 2, 2000, 'strel z merkom');
+    // Od blizu zadene.
+    await walk(hunter, 3.6, 11);
+    await sleep(SHOVEL_INTERVAL_MS);
+    await swingAt(hunter, room.debugPlayer(hunter.playerId)!, room.debugPlayer(prop.playerId)!);
+    await waitFor(() => hunter.shots.length === 2, 2000, 'udarec od blizu');
     expect(hunter.shots[1]!.kind).toBe('player');
-    expect(room.debugPlayer(prop.playerId)!.hp).toBe(HP_MAX - WEAPONS.sniper.damage);
+    expect(room.debugPlayer(prop.playerId)!.hp).toBe(HP_MAX - SHOVEL_DAMAGE);
+  });
+
+  it('skrivalec se vsakih 25 s samodejno spremeni; imena so občasno razkrita', { timeout: 40000 }, async () => {
+    const url = await start(0.1);
+    const a = bot(url);
+    const b = bot(url);
+    const ra = await a.create('Ana');
+    await b.join('Bor', ra.ok ? ra.code : '');
+    await waitFor(() => a.room?.players.length === 2, 2000, 'dva');
+    a.socket.emit('updateSettings', { hideTime: 20, map: 'construction' });
+    await waitFor(() => a.room?.settings.map === 'construction', 2000, 'nastavitve');
+    await a.start();
+    await waitFor(() => a.room?.phase === 'hiding' && a.seq > 0 && b.seq > 0, 3000, 'skrivanje');
+    const prop = a.role() === 'prop' ? a : b;
+    const room = server!.manager.get(ra.ok ? ra.code : '')!;
+    // Skrivalec že ob začetku dobi obliko iz nabora.
+    await waitFor(() => room.debugPlayer(prop.playerId)!.model > 0, 4000, 'samodejna sprememba');
+    const first = room.debugPlayer(prop.playerId)!.model;
+    expect(getWorld('construction').transformable!.has(first)).toBe(true);
+    await waitFor(() => (prop.snap?.you?.autoShapeIn ?? -1) >= 0, 2000, 'odštevanje v posnetku');
+    // Razkrivanje imen: med lovom v zadnjih 10 s vsakega 30-s cikla (x 0.1 = 2-3 s).
+    await waitFor(() => a.room?.phase === 'hunting', 5000, 'lov');
+    let revealed = false;
+    a.socket.on('snap', (s) => {
+      if (s.reveal) revealed = true;
+    });
+    await waitFor(() => revealed, 5000, 'razkrita imena');
+  });
+
+  it('Hiša: skrivalec začne kot predmet iz okolice (ne kot duh)', { timeout: 20000 }, async () => {
+    const url = await start(0.1);
+    const a = bot(url);
+    const b = bot(url);
+    const ra = await a.create('Ana');
+    await b.join('Bor', ra.ok ? ra.code : '');
+    await waitFor(() => a.room?.players.length === 2, 2000, 'dva');
+    a.socket.emit('updateSettings', { hideTime: 45 });
+    await waitFor(() => a.room?.settings.hideTime === 45, 2000, 'nastavitve');
+    await a.start();
+    await waitFor(() => a.room?.phase === 'hiding' && a.seq > 0 && b.seq > 0, 3000, 'skrivanje');
+    const prop = a.role() === 'prop' ? a : b;
+    const room = server!.manager.get(ra.ok ? ra.code : '')!;
+    const p0 = room.debugPlayer(prop.playerId)!;
+    const sx = p0.x;
+    const sz = p0.z;
+    expect(room.debugPlayer(prop.playerId)!.model).toBeGreaterThan(0);
+    const model = room.debugPlayer(prop.playerId)!.model;
+    // Začetna oblika ne sproži čakanja – takoj se lahko spremeni v nekaj drugega.
+    expect(room.debugPlayer(prop.playerId)!.transformReadyAt).toBe(0);
+    // Najbližji primerek izbrane vrste je blizu skrivalca (ne npr. delovna miza iz garaže).
+    const dist = Math.min(
+      ...WORLD.map.props.filter((pl) => pl.type === model).map((pl) => Math.hypot(pl.x - sx, pl.z - sz)),
+    );
+    expect(dist).toBeLessThan(6);
+  });
+
+  it('gostitelj lahko izklopi radar', { timeout: 20000 }, async () => {
+    const url = await start(0.1);
+    const a = bot(url);
+    const b = bot(url);
+    const ra = await a.create('Ana');
+    await b.join('Bor', ra.ok ? ra.code : '');
+    await waitFor(() => a.room?.players.length === 2, 2000, 'dva');
+    expect(a.room!.settings.radar).toBe(true);
+    b.socket.emit('updateSettings', { radar: false }); // gost ne sme
+    await sleep(150);
+    expect(a.room!.settings.radar).toBe(true);
+    a.socket.emit('updateSettings', { hideTime: 20, radar: false });
+    await waitFor(() => a.room?.settings.radar === false, 2000, 'radar izklopljen');
+    await a.start();
+    await waitFor(() => a.room?.phase === 'hunting', 6000, 'lov');
+    const hunter = a.role() === 'hunter' ? a : b;
+    let got = false;
+    hunter.socket.once('radar', () => (got = true));
+    hunter.socket.emit('radar');
+    await sleep(400);
+    expect(got).toBe(false);
+  });
+
+  it('Construction: lovec med skrivanjem hodi po zaprti sobi, ven ne more', { timeout: 30000 }, async () => {
+    const url = await start(0.2);
+    const a = bot(url);
+    const b = bot(url);
+    const ra = await a.create('Ana');
+    await b.join('Bor', ra.ok ? ra.code : '');
+    await waitFor(() => a.room?.players.length === 2, 2000, 'dva');
+    a.socket.emit('updateSettings', { hideTime: 45, map: 'construction' });
+    await waitFor(() => a.room?.settings.map === 'construction', 2000, 'nastavitve');
+    await a.start();
+    await waitFor(() => a.room?.phase === 'hiding' && a.seq > 0 && b.seq > 0, 3000, 'skrivanje');
+    const hunter = a.role() === 'hunter' ? a : b;
+    const room = server!.manager.get(ra.ok ? ra.code : '')!;
+    // Po sobi lahko hodi.
+    await walk(hunter, 6.5, 6.5);
+    expect(room.debugPlayer(hunter.playerId)!.x).toBeCloseTo(6.5, 1);
+    // Skozi zaprta vrata (x 9, z 5.5-7.5) ne more – strežnik ga vrne.
+    const seq = hunter.seq;
+    hunter.sendState(9.0, 0, 6.5);
+    await waitFor(() => hunter.seq > seq, 2000, 'zavrnjen izhod');
+    expect(room.debugPlayer(hunter.playerId)!.x).toBeLessThan(8.9);
   });
 });

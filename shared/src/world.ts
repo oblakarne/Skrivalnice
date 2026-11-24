@@ -11,6 +11,8 @@ export interface World {
   propBoxes: Box[];
   /** Vse statične ovire za gibanje. */
   staticBoxes: Box[];
+  /** Ovire, ko so vrata sobe lovcev zaprta (med skrivanjem). */
+  closedBoxes: Box[];
   /** Vrste predmetov, v katere se lahko spremeniš (null = vse). */
   transformable: ReadonlySet<number> | null;
 }
@@ -60,7 +62,9 @@ export function buildWorld(map: MapDef): World {
   const wallBoxes = [...solids, floor, ceiling];
   const propBoxes = map.props.map((pl) => placementBox(pl.type, pl.x, pl.y, pl.z, pl.q));
   const transformable = map.transformable ? new Set(map.transformable.map((id) => propIndex(id))) : null;
-  return { map, wallBoxes, propBoxes, staticBoxes: [...wallBoxes, ...propBoxes], transformable };
+  const staticBoxes = [...wallBoxes, ...propBoxes];
+  const gates: Box[] = (map.gates ?? []).map((g) => ({ minX: g.minX, minY: g.minY, minZ: g.minZ, maxX: g.maxX, maxY: g.maxY, maxZ: g.maxZ }));
+  return { map, wallBoxes, propBoxes, staticBoxes, closedBoxes: [...staticBoxes, ...gates], transformable };
 }
 
 const WORLDS = new Map<string, World>(Object.values(MAPS).map((m) => [m.id, buildWorld(m)]));
@@ -110,6 +114,56 @@ export function raycastWorld(world: World, ray: Ray, maxT: number): WorldHit | n
     }
   }
   return best;
+}
+
+/** Ovire za dano fazo: med lovom so vrata odprta, sicer zaprta. */
+export function boxesFor(world: World, gatesOpen: boolean): Box[] {
+  return gatesOpen ? world.staticBoxes : world.closedBoxes;
+}
+
+// ---------------------------------------------------------------- dvigalo
+
+const ELEV_SPEED = 1.5; // m/s
+const ELEV_WAIT_MS = 2500;
+
+interface ElevLeg {
+  from: number;
+  to: number;
+  ms: number;
+}
+
+/** Vozni red: postanek na vsaki postaji, gor do vrha in nazaj dol. */
+function elevatorLegs(stops: number[]): ElevLeg[] {
+  const legs: ElevLeg[] = [];
+  const route = [...stops, ...stops.slice(1, -1).reverse()];
+  for (let i = 0; i < route.length; i++) {
+    const a = route[i]!;
+    const b = route[(i + 1) % route.length]!;
+    legs.push({ from: a, to: a, ms: ELEV_WAIT_MS });
+    legs.push({ from: a, to: b, ms: (Math.abs(b - a) / ELEV_SPEED) * 1000 });
+  }
+  return legs;
+}
+
+/** Višina ploščadi dvigala ob dani uri (ms) – enaka na strežniku in vseh telefonih. */
+export function elevatorY(world: World, clockMs: number): number {
+  const e = world.map.elevator;
+  if (!e || e.stops.length < 2) return 0;
+  const legs = elevatorLegs(e.stops);
+  const period = legs.reduce((s, l) => s + l.ms, 0);
+  let t = ((clockMs % period) + period) % period;
+  for (const l of legs) {
+    if (t <= l.ms) return l.from + (l.to - l.from) * (l.ms > 0 ? t / l.ms : 1);
+    t -= l.ms;
+  }
+  return e.stops[0]!;
+}
+
+/** Ploščad dvigala kot kvader (zgornja ploskev na višini y). */
+export function elevatorBox(world: World, y: number): Box | null {
+  const e = world.map.elevator;
+  if (!e) return null;
+  return { minX: e.x0, maxX: e.x1, minZ: e.z0, maxZ: e.z1, minY: y - 0.15, maxY: y };
 }
 
 /** Ali je točka znotraj mej mape? */

@@ -1,8 +1,14 @@
 import {
   collisionYaw,
   DEFAULT_SETTINGS,
-  isWeaponId,
-  WEAPONS,
+  AUTO_SHAPE_MS,
+  boxesFor,
+  PROPS,
+  REVEAL_DURATION_MS,
+  REVEAL_PERIOD_MS,
+  SHOVEL_DAMAGE,
+  SHOVEL_INTERVAL_MS,
+  type Box,
   canTransformInto,
   HP_MAX,
   HUNTER_EYE,
@@ -30,13 +36,14 @@ import {
   TRANSFORM_COOLDOWN_MS,
   TRANSFORM_RANGE,
   getWorld,
-  resolveShot,
+  resolveSwing,
   shotRayFromCamera,
   WRONG_PROP_PENALTY,
   type ShotTarget,
   type World,
   type Phase,
   type PlayerSnap,
+  type RadarBlip,
   type Result,
   type RoomInfo,
   type RoomSettings,
@@ -69,6 +76,7 @@ export class Room {
   private world: World = getWorld(DEFAULT_SETTINGS.map);
   private nextId = 0;
   private decoyId = 0;
+  private huntStartedAt = 0;
   /** Vabe v trenutni rundi. */
   readonly decoys: { id: string; owner: string; x: number; y: number; z: number; yaw: number; model: number; alive: boolean }[] = [];
   private dirty = true;
@@ -228,7 +236,6 @@ export class Room {
     for (const p of this.players.values()) {
       p.role = 'spectator';
       p.alive = false;
-      p.reloadUntil = 0;
     }
     if (msg) this.io.to(this.channel).emit('toast', msg);
     this.dirty = true;
@@ -252,17 +259,14 @@ export class Room {
     let hi = 0;
     let pi = 0;
     for (const p of this.players.values()) {
-      p.reloadUntil = 0;
       p.lastShotAt = 0;
       p.transformReadyAt = 0;
       p.surviveAccum = 0;
       p.marked.clear();
       p.decoysLeft = DECOYS_PER_ROUND;
       p.radarReadyAt = 0;
-      p.scoped = false;
       p.hp = HP_MAX;
-      p.weapon = 'pistol';
-      p.ammoBy = { pistol: WEAPONS.pistol.mag, sniper: WEAPONS.sniper.mag };
+      p.autoShapeAt = now + AUTO_SHAPE_MS * this.opts.timeScale;
       p.pitch = 0;
       p.y = 0;
       p.lastMoveAt = now;
@@ -296,7 +300,28 @@ export class Room {
     // Najprej stanje sobe (vloge), nato teleporti – odjemalec tako vedno pozna svojo vlogo.
     this.io.to(this.channel).emit('room', this.info());
     this.dirty = false;
+    // Skrivalci začnejo že kot predmet iz okolice (ne kot bel duh).
+    for (const p of participants) if (p.role === 'prop') this.initialShape(p, now);
     for (const p of participants) this.teleport(p);
+  }
+
+  /** Začetna oblika skrivalca: naključna med najbližjimi vrstami (oz. iz nabora mape). */
+  private initialShape(p: Player, now: number): void {
+    let types = this.autoShapeTypes(p);
+    if (this.world.transformable) {
+      const k = Math.floor(this.opts.random() * types.length);
+      types = [...types.slice(k), ...types.slice(0, k)];
+    } else {
+      types = [...shuffle(types.slice(0, 4), this.opts.random), ...types.slice(4)];
+    }
+    outer: for (const maxShift of [0.001, 1.0]) {
+      for (const type of types) {
+        if (this.applyShape(p, type, maxShift).ok) break outer;
+      }
+    }
+    // Začetna oblika ne šteje kot sprememba – skrivalec se lahko takoj spremeni.
+    p.transformReadyAt = 0;
+    p.autoShapeAt = now + AUTO_SHAPE_MS * this.opts.timeScale;
   }
 
   private teleport(p: Player): void {
@@ -313,7 +338,7 @@ export class Room {
     if (!s || s.seq !== player.seq) return;
     if (!IN_ROUND.has(this.phase) || !player.alive || player.role === 'spectator') return;
     const now = this.opts.now();
-    if (this.phase === 'hiding' && player.role === 'hunter') {
+    if (this.phase === 'hiding' && player.role === 'hunter' && !this.world.map.gates) {
       // Lovci med skrivanjem stojijo na mestu; sprejmemo le smer pogleda.
       player.yaw = s.yaw;
       player.pitch = s.pitch;
@@ -323,6 +348,7 @@ export class Room {
       this.world,
       { x: player.x, z: player.z, model: player.model, dt: (now - player.lastMoveAt) / 1000 },
       s,
+      this.boxes(),
     );
     if (verdict !== 'ok') {
       this.teleport(player);
@@ -363,7 +389,7 @@ export class Room {
     return this.applyShape(player, rawType);
   }
 
-  private applyShape(player: Player, type: number): TransformResult {
+  private applyShape(player: Player, type: number, maxShift = 1.0): TransformResult {
     const now = this.opts.now();
     if (!canTransformInto(this.world, type)) return { ok: false, error: 'V ta predmet se ne moreš spremeniti.' };
     if (type === player.model) return { ok: true, model: type };
@@ -375,15 +401,16 @@ export class Room {
       player.y,
       shape,
       collisionYaw(type, player.yaw),
-      this.world.staticBoxes,
+      this.boxes(),
     );
     // Tudi nad glavo mora biti prostor (npr. pod odrom).
-    const ceil = ceilingHeight(r.x, r.z, player.y, shape, collisionYaw(type, player.yaw), this.world.staticBoxes);
+    const ceil = ceilingHeight(r.x, r.z, player.y, shape, collisionYaw(type, player.yaw), this.boxes());
     if (player.y + shape.h > ceil + 1e-3) return { ok: false, error: 'Tu ni prostora.' };
     const shift = Math.hypot(r.x - player.x, r.z - player.z);
-    if (!r.ok || shift > 1.0) return { ok: false, error: 'Tu ni prostora.' };
+    if (!r.ok || shift > maxShift) return { ok: false, error: 'Tu ni prostora.' };
     player.model = type;
-    player.transformReadyAt = now + TRANSFORM_COOLDOWN_MS;
+    player.transformReadyAt = now + TRANSFORM_COOLDOWN_MS * this.opts.timeScale;
+    player.autoShapeAt = now + AUTO_SHAPE_MS * this.opts.timeScale;
     if (shift > 1e-3) {
       player.x = r.x;
       player.z = r.z;
@@ -397,18 +424,11 @@ export class Room {
     const s = parseShoot(raw);
     if (!s || this.phase !== 'hunting' || player.role !== 'hunter' || !player.alive) return;
     const now = this.opts.now();
-    const w = WEAPONS[player.weapon];
-    if (player.reloadUntil > 0) return;
-    if (player.ammoBy[player.weapon] <= 0) {
-      this.startReload(player, now);
-      return;
-    }
-    if (now - player.lastShotAt < w.intervalMs - 40) return;
+    if (now - player.lastShotAt < SHOVEL_INTERVAL_MS - 40) return;
     const head = { x: player.x, y: player.y + HUNTER_EYE, z: player.z };
     if (Math.hypot(s.ox - head.x, s.oy - head.y, s.oz - head.z) > SHOT_ORIGIN_TOLERANCE) return;
 
     player.lastShotAt = now;
-    player.ammoBy[player.weapon]--;
     const ray = shotRayFromCamera({ x: s.ox, y: s.oy, z: s.oz }, { x: s.dx, y: s.dy, z: s.dz }, player);
     const targets: ShotTarget[] = [];
     // Vabe najprej: pri enaki razdalji (vaba na mestu skrivalca) zadene vabo.
@@ -418,9 +438,8 @@ export class Room {
     for (const p of this.players.values()) {
       if (p.role === 'prop' && p.alive) targets.push({ id: p.id, x: p.x, y: p.y, z: p.z, yaw: p.yaw, model: p.model });
     }
-    // Doseg: ostrostrelka skozi merek daleč. Pomoč pri merjenju le za že zadete skrivalce.
-    const range = player.scoped && w.scope ? w.scopedRange : w.range;
-    const hit = resolveShot(this.world, ray, range, targets, player.marked);
+    // Lopata seže le blizu. Pomoč pri merjenju le za že zadete skrivalce.
+    const hit = resolveSwing(this.world, ray, player, targets, player.marked);
     const decoy = hit.kind === 'player' ? this.decoys.find((d) => d.id === hit.target && d.alive) : undefined;
     if (decoy) {
       // Vaba: lovec je zadel "pravi predmet" (kazen), lastnik dobi točke, vaba izgine.
@@ -446,24 +465,10 @@ export class Room {
     if (hit.kind === 'player' && hit.target) {
       player.marked.add(hit.target);
       const victim = this.players.get(hit.target);
-      if (victim) this.damage(victim, w.damage, player);
+      if (victim) this.damage(victim, SHOVEL_DAMAGE, player);
     } else if (hit.kind === 'prop' && this.settings.penalty) {
       this.damage(player, WRONG_PROP_PENALTY, null);
     }
-    if (player.ammoBy[player.weapon] <= 0 && player.alive) this.startReload(player, now);
-  }
-
-  private startReload(player: Player, now: number): void {
-    player.reloadWeapon = player.weapon;
-    player.reloadUntil = now + WEAPONS[player.weapon].reloadMs;
-  }
-
-  handleWeapon(player: Player, raw: unknown): void {
-    if (!isWeaponId(raw) || player.role !== 'hunter' || !player.alive || raw === player.weapon) return;
-    player.weapon = raw;
-    player.reloadUntil = 0; // menjava prekine polnjenje
-    player.scoped = false;
-    player.lastShotAt = this.opts.now() - WEAPONS[raw].intervalMs + 300; // kratek zamik ob menjavi
   }
 
   private damage(victim: Player, amount: number, killer: Player | null): void {
@@ -471,7 +476,6 @@ export class Room {
     victim.hp = Math.max(0, victim.hp - amount);
     if (victim.hp > 0) return;
     victim.alive = false;
-    victim.reloadUntil = 0;
     if (killer) {
       killer.score += SCORE_KILL;
       killer.kills++;
@@ -490,7 +494,7 @@ export class Room {
     if (player.decoysLeft <= 0) return { ok: false, error: 'Nimaš več vab.' };
     player.decoysLeft--;
     this.decoys.push({
-      id: `d${++this.decoyId}`,
+      id: `d${++this.decoyId}:${player.id}`,
       owner: player.id,
       x: player.x,
       y: player.y,
@@ -504,29 +508,80 @@ export class Room {
 
   /** Lovčev radar: koliko pravih skrivalcev (ne vab) je v dosegu. */
   handleRadar(player: Player): void {
-    if (this.phase !== 'hunting' || player.role !== 'hunter' || !player.alive) return;
+    if (this.phase !== 'hunting' || player.role !== 'hunter' || !player.alive || !this.settings.radar) return;
     const now = this.opts.now();
     if (now < player.radarReadyAt) return;
     player.radarReadyAt = now + RADAR_COOLDOWN_MS;
     let count = 0;
+    const blips: RadarBlip[] = [];
+    // Le namig: smer zaokrožena na 30°, oddaljenost na tretjine dosega.
+    const step = Math.PI / 6;
     for (const p of this.players.values()) {
       if (p.role !== 'prop' || !p.alive) continue;
-      if (Math.hypot(p.x - player.x, p.z - player.z) <= RADAR_RANGE && Math.abs(p.y - player.y) < 4) count++;
+      const dx = p.x - player.x;
+      const dz = p.z - player.z;
+      const d = Math.hypot(dx, dz);
+      if (d > RADAR_RANGE || Math.abs(p.y - player.y) >= 4) continue;
+      count++;
+      const a = Math.round(Math.atan2(-dx, -dz) / step) * step;
+      blips.push({ a: r3(a), d: Math.max(1, Math.ceil((d / RADAR_RANGE) * 3)) / 3 });
     }
-    player.socket?.emit('radar', { count, range: RADAR_RANGE, x: r3(player.x), y: r3(player.y), z: r3(player.z) });
+    player.socket?.emit('radar', {
+      count,
+      range: RADAR_RANGE,
+      x: r3(player.x),
+      y: r3(player.y),
+      z: r3(player.z),
+      blips,
+    });
   }
 
-  handleScope(player: Player, on: unknown): void {
-    if (typeof on !== 'boolean') return;
-    player.scoped =
-      on && player.role === 'hunter' && player.alive && IN_ROUND.has(this.phase) && WEAPONS[player.weapon].scope;
+  /**
+   * Vrste za samodejno spremembo: nabor mape ali vrste predmetov na mapi,
+   * urejene po oddaljenosti od skrivalca (da se zlije z okolico, npr. v kopalnici ne postane delovna miza).
+   */
+  private autoShapeTypes(p: Player): number[] {
+    if (this.world.transformable) return [...this.world.transformable];
+    const nearest = new Map<number, number>();
+    for (const pl of this.world.map.props) {
+      const d = Math.hypot(pl.x - p.x, pl.z - p.z) + Math.abs(pl.y - p.y) * 2;
+      nearest.set(pl.type, Math.min(nearest.get(pl.type) ?? Infinity, d));
+    }
+    return [...nearest.entries()].sort((a, b) => a[1] - b[1]).map(([type]) => type);
   }
 
-  handleReload(player: Player): void {
-    if (this.phase !== 'hunting' && this.phase !== 'hiding') return;
-    if (player.role !== 'hunter' || !player.alive || player.reloadUntil > 0) return;
-    if (player.ammoBy[player.weapon] >= WEAPONS[player.weapon].mag) return;
-    this.startReload(player, this.opts.now());
+  /** Samodejna sprememba v naslednjo obliko (preskoči oblike, za katere ni prostora). */
+  private autoShape(p: Player, now: number): void {
+    const types = this.autoShapeTypes(p);
+    // Nabor mape: kroži naprej od trenutne oblike. Sicer: najbližja vrsta, ki ni trenutna.
+    const start = this.world.transformable ? types.indexOf(p.model) : -1;
+    // Najprej oblika, ki se prilega brez premika (zaklenjen skrivalec ostane na mestu), nato z majhnim premikom.
+    for (const maxShift of [0.001, 1.0]) {
+      for (let i = 1; i <= types.length; i++) {
+        const type = types[(start + i + types.length) % types.length]!;
+        if (type === p.model) continue;
+        const res = this.applyShape(p, type, maxShift);
+        if (res.ok) {
+          p.autoShapeAt = now + AUTO_SHAPE_MS * this.opts.timeScale;
+          p.socket?.emit('toast', `⏳ Samodejna sprememba: ${PROPS[type]?.name ?? '?'}`);
+          return;
+        }
+      }
+    }
+    p.autoShapeAt = now + 2000 * this.opts.timeScale;
+  }
+
+  /** Ali so imena skrivalcev ta trenutek vidna vsem (zadnjih 10 s vsakega 30-s cikla lova)? */
+  private revealNow(now: number): boolean {
+    if (this.phase !== 'hunting') return false;
+    const ts = this.opts.timeScale;
+    const elapsed = now - this.huntStartedAt;
+    return elapsed % (REVEAL_PERIOD_MS * ts) >= (REVEAL_PERIOD_MS - REVEAL_DURATION_MS) * ts;
+  }
+
+  /** Ovire za trenutno fazo (vrata sobe lovcev so odprta samo med lovom). */
+  private boxes(): Box[] {
+    return boxesFor(this.world, this.phase === 'hunting');
   }
 
   // ------------------------------------------------------------------ zanka
@@ -559,11 +614,10 @@ export class Room {
     }
     if (this.players.size === 0) return;
 
-    // Polnjenje orožja
-    for (const p of this.players.values()) {
-      if (p.reloadUntil > 0 && now >= p.reloadUntil) {
-        p.reloadUntil = 0;
-        p.ammoBy[p.reloadWeapon] = WEAPONS[p.reloadWeapon].mag;
+    // Samodejna sprememba skrivalcev vsakih 25 s
+    if (this.phase === 'hiding' || this.phase === 'hunting') {
+      for (const p of this.players.values()) {
+        if (p.role === 'prop' && p.alive && now >= p.autoShapeAt) this.autoShape(p, now);
       }
     }
 
@@ -573,6 +627,7 @@ export class Room {
         else if (this.count('hunter') === 0) this.endRound('props');
         else if (now >= this.phaseEndsAt) {
           this.phase = 'hunting';
+          this.huntStartedAt = now;
           this.phaseEndsAt = now + this.settings.huntTime * 1000 * this.opts.timeScale;
           this.dirty = true;
         }
@@ -639,6 +694,7 @@ export class Room {
     // Vabe so za vse videti kot skrivalci-predmeti.
     for (const d of this.decoys) all.push([d.id, r3(d.x), r3(d.y), r3(d.z), r3(d.yaw), 0, d.model, d.alive ? 1 : 0, HP_MAX]);
     const t = Math.max(0, Math.round(this.phaseEndsAt - now));
+    const reveal = this.revealNow(now);
     for (const p of this.players.values()) {
       if (!p.socket) continue;
       // Lovci med skrivanjem ne dobijo položajev skrivalcev.
@@ -646,14 +702,14 @@ export class Room {
       const snapshot: Snapshot = {
         t,
         p: list,
+        reveal,
+        clock: Date.now() % 86400000,
         you:
           p.role === 'spectator'
             ? null
             : {
                 hp: p.hp,
-                ammo: p.ammoBy[p.weapon],
-                reloading: p.reloadUntil > 0,
-                weapon: p.weapon,
+                autoShapeIn: p.role === 'prop' && p.alive ? Math.max(0, p.autoShapeAt - now) : -1,
                 decoys: p.decoysLeft,
               },
       };

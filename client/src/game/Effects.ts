@@ -13,6 +13,7 @@ interface Effect {
 const sparkGeo = new THREE.SphereGeometry(0.06, 8, 6);
 const flashGeo = new THREE.SphereGeometry(0.09, 8, 6);
 const puffGeo = new THREE.BoxGeometry(0.14, 0.14, 0.14);
+const smokeGeo = new THREE.SphereGeometry(0.35, 10, 7);
 
 export class Effects {
   private list: Effect[] = [];
@@ -78,6 +79,29 @@ export class Effects {
         mat.dispose();
       },
     });
+  }
+
+  /** Oblak dima ob spremembi oblike. */
+  smoke(at: THREE.Vector3, size = 1): void {
+    for (let i = 0; i < 14; i++) {
+      const shade = 0.75 + Math.random() * 0.2;
+      const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(shade, shade, shade), transparent: true, depthWrite: false });
+      const m = new THREE.Mesh(smokeGeo, mat);
+      m.position.set(at.x + (Math.random() - 0.5) * size, at.y + Math.random() * size * 0.6, at.z + (Math.random() - 0.5) * size);
+      const v = new THREE.Vector3((Math.random() - 0.5) * 1.2, 0.8 + Math.random() * 0.8, (Math.random() - 0.5) * 1.2);
+      const s0 = (0.5 + Math.random() * 0.4) * size;
+      this.add({
+        obj: m,
+        life: 1.2,
+        max: 1.2,
+        update: (k, dt) => {
+          m.position.addScaledVector(v, dt);
+          m.scale.setScalar(s0 * (1 + (1 - k) * 1.6));
+          mat.opacity = 0.85 * k;
+        },
+        dispose: () => mat.dispose(),
+      });
+    }
   }
 
   puff(at: THREE.Vector3): void {

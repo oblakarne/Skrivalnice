@@ -47,7 +47,6 @@
       </div>
       <div id="desktop-help" class="hidden"></div>
 
-      <div id="scope-overlay" class="hidden"></div>
       <div id="lock-badge" class="hidden">🔒 Zaklenjen – obračaš samo kamero</div>
       <div id="transform-list" class="hidden"></div>
 
@@ -58,12 +57,9 @@
           <div id="joy-knob"></div>
         </div>
         <div class="tbtns">
-          <button class="tbtn big" id="btn-fire" data-for="hunter">🔫<span>Strel</span></button>
+          <button class="tbtn big" id="btn-fire" data-for="hunter">⛏<span>Udari</span></button>
           <button class="tbtn big" id="btn-transform" data-for="prop">✨<span>Spremeni</span></button>
           <button class="tbtn jump" id="btn-jump" data-for="hunter prop">⬆<span>Skok</span></button>
-          <button class="tbtn" id="btn-reload" data-for="hunter">↻<span>Polni</span></button>
-          <button class="tbtn" id="btn-scope" data-for="hunter">🔭<span>Merek</span></button>
-          <button class="tbtn" id="btn-weapon" data-for="hunter">🎯<span>Ostrostr.</span></button>
           <button class="tbtn" id="btn-radar" data-for="hunter">📡<span>Radar</span></button>
           <button class="tbtn" id="btn-decoy" data-for="prop">🎭<span>Vaba 2</span></button>
           <button class="tbtn" id="btn-lock" data-for="prop">🔓<span>Zakleni</span></button>
@@ -136,6 +132,9 @@
             <label class="setting">Kazen za napačen strel
               <select id="set-penalty"><option value="1">vklopljena</option><option value="0">izklopljena</option></select>
             </label>
+            <label class="setting">Radar lovcev 📡
+              <select id="set-radar"><option value="1">vklopljen</option><option value="0">izklopljen</option></select>
+            </label>
             <div id="settings-note" class="muted small"></div>
           </div>
         </div>
@@ -207,12 +206,12 @@
     <div id="screen-help" class="overlay hidden">
       <div class="card narrow help">
         <h2>Kako se igra?</h2>
-        <p><b>Skrivalci</b> se v času skrivanja razbežijo po mapi. Pomeri v predmet (stol, sod, žogo …) in pritisni <b>Spremeni</b> – postaneš ta predmet. Z gumbom <b>Zakleni</b> obstaneš na mestu in v isti smeri, kamero pa lahko še vedno obračaš.</p>
-        <p><b>Lovci</b> med skrivanjem ne vidijo ničesar. Ko se začne lov, iščejo predmete, ki so »odveč« ali na čudnem mestu, in streljajo nanje. Strel v pravi predmet lovcu vzame malo življenja! Lovec ima <b>pištolo</b> (hitra, do 18 m) in <b>ostrostrelko</b> (močna; skozi <b>merek 🔭</b> do 45 m, pogled se takrat obrača počasneje). Ko lovec skrivalca enkrat zadane, mu merek nanj rahlo pomaga.</p>
+        <p><b>Skrivalci</b> se v času skrivanja razbežijo po mapi. Že na začetku si naključen predmet iz okolice. Za drugo obliko pomeri v predmet (stol, sod, žogo …) in pritisni <b>Spremeni</b>. Z gumbom <b>Zakleni</b> obstaneš na mestu in v isti smeri, kamero pa lahko še vedno obračaš.</p>
+        <p><b>Lovci</b> med skrivanjem ne vidijo ničesar. Ko se začne lov, iščejo predmete, ki so »odveč« ali na čudnem mestu, in jih udarijo z <b>lopato ⛏</b> – priti morajo čisto blizu (2 udarca ujameta skrivalca; lopata zadene tudi nizek predmet pod njo). Udarec v pravi predmet lovcu vzame malo življenja! Na mapi Construction lovci med skrivanjem čakajo v zaprti sobi, vrata se odprejo ob začetku lova; ob stavbi je <b>dvigalo</b> do strehe. Vsakih 30 s so imena skrivalcev 10 s vidna vsem (tudi skozi stene).</p>
         <p>Na mapi <b>Construction</b> imaš nabor 6 oblik – z gumbom <b>Zamenjaj</b> preklapljaš med njimi (taki predmeti so tudi po mapi); ostali predmeti so okras. Stavba ima štiri nivoje – po stopnicah se splača splezati.</p>
-        <p>Po vsaki spremembi moraš počakati <b>5 s</b>, preden se spremeniš znova. Skrivalec ima 2 <b>vabi 🎭</b>: pusti lažno kopijo sebe – če jo lovec ustreli, izgubi življenje, ti pa dobiš točke. Lovec ima <b>radar 📡</b> (vsakih 25 s), ki pove, koliko pravih skrivalcev je v 12 m (vab ne zazna). Za vsak ulov lovec dobi +20 ❤.</p>
+        <p>Po vsaki spremembi moraš počakati <b>5 s</b>, preden se spremeniš znova; vsakih <b>25 s</b> se skrivalec samodejno spremeni v naslednjo obliko (pokadi se). Skrivalec ima 2 <b>vabi 🎭</b>: pusti lažno kopijo sebe – če jo lovec ustreli, izgubi življenje, ti pa dobiš točke. Lovec ima <b>radar 📡</b> (vsakih 25 s): 5 s kaže zelen radarski krog, pike pa nakažejo smer pravih skrivalcev v 12 m (vab ne zazna). Gostitelj ga lahko izklopi. Za vsak ulov lovec dobi +20 ❤.</p>
         <p>Če skrivalec preživi do konca, zmagajo skrivalci.</p>
-        <p class="muted small">Telefon: levi palec – hoja, desni palec – pogled. Računalnik: WASD, miška, klik = strel, 1/2 ali X = orožje, F = radar, G = vaba, desni klik ali Z = merek, E = spremeni, Q = zakleni, R = polni, presledek = skok, Esc = meni.</p>
+        <p class="muted small">Telefon: levi palec – hoja, desni palec – pogled. Računalnik: WASD, miška, klik = zamah z lopato, F = radar, G = vaba, E = spremeni, Q = zakleni, presledek = skok, Esc = meni.</p>
         <button id="btn-help-close" class="primary">Razumem</button>
       </div>
     </div>

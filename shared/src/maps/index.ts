@@ -19,4 +19,4 @@ export function isMapId(v: unknown): v is string {
 }
 
 export { HISA, CONSTRUCTION };
-export type { MapDef, SolidDef, FloorDef, DecorDef, WorldPropPlacement, MapLighting } from './types';
+export type { MapDef, SolidDef, FloorDef, DecorDef, WorldPropPlacement, MapLighting, ElevatorDef } from './types';

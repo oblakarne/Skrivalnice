@@ -47,6 +47,15 @@ export interface MapLighting {
   sunColor: number;
 }
 
+export interface ElevatorDef {
+  x0: number;
+  z0: number;
+  x1: number;
+  z1: number;
+  /** Višine postaj od spodaj navzgor (npr. [0, 3, 6]). */
+  stops: number[];
+}
+
 export interface MapDef {
   id: string;
   name: string;
@@ -71,6 +80,13 @@ export interface MapDef {
   sky?: [number, number];
   /** Oblaki na nebu. */
   clouds?: boolean;
+  /**
+   * Vrata sobe lovcev: zaprta med skrivanjem (lovci čakajo v sobi), odprta med lovom.
+   * Če mapa ima vrata, lovci med skrivanjem niso zatemnjeni in lahko hodijo po sobi.
+   */
+  gates?: SolidDef[];
+  /** Dvigalo: ploščad (x0..x1, z0..z1), ki stalno vozi med postajami (višine). */
+  elevator?: ElevatorDef;
   /** Megla: [barva, blizu, daleč]. */
   fog?: [number, number, number];
 }

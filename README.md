@@ -5,7 +5,7 @@
 - 2–8 igralcev v sobi, pridružiš se s 4-mestno kodo ali povezavo
 - dve mapi (izbere ju gostitelj v čakalnici):
   - **Hiša** (36 × 26 m): 8 prostorov, vsak s svojo barvo sten in tal
-  - **Construction** (48 × 36 m): gradbišče na prostem z modrim nebom in oblaki; stavba v gradnji s štirimi nivoji (tla, 3 m, 6 m, 9 m), oder, stolp z mostom, bager, žerjav, kupi nosilcev. Skrivalec ima nabor **6 oblik** in med njimi preklaplja z gumbom **Zamenjaj**
+  - **Construction** (48 × 36 m): gradbišče na prostem z modrim nebom in oblaki; stavba v gradnji s štirimi nivoji (tla, 3 m, 6 m, 9 m), oder, stolp z mostom, bager, žerjav, kupi nosilcev. Skrivalec ima nabor **6 oblik** in med njimi preklaplja z gumbom **Zamenjaj**. Lovci med skrivanjem čakajo v zaprti sobi, vrata se odprejo ob lovu; ob stavbi vozi **dvigalo** (tla → 3 m → 6 m)
 - 53 vrst predmetov (pohištvo, gradbeni material …)
 - upravljanje z dotikom (vedno vidna igralna palica + vlečenje za pogled) ali s tipkovnico in miško
 - vsa grafika in zvoki so narejeni v kodi (brez tujih datotek)
@@ -48,9 +48,9 @@ Na telefonih (povezanih na **isti Wi-Fi**) odpri naslov »Omrežje«. Če se ne 
 
 1. Vpiši ime → **Ustvari sobo** → **Deli povezavo** (ali povej kodo).
 2. Prijatelji vpišejo kodo → **Pridruži se**. Gostitelj (👑) izbere mapo, nastavi čase in število rund ter pritisne **Začni igro**.
-3. **Skrivanje** (30 s): skrivalci pomerijo v predmet v bližini (obrobi se zeleno) in pritisnejo **Spremeni**. Z **Zakleni** obstaneš na mestu in v isti smeri – obračaš lahko samo kamero. Lovci ta čas ne vidijo ničesar.
-4. **Lov** (3 min): lovci streljajo na sumljive predmete s **pištolo** (hitra, do 18 m) ali **ostrostrelko** (50 škode; skozi merek 🔭 do 45 m, pogled se obrača počasneje). Strel v pravi predmet lovcu vzame 5 življenja! Ko lovec skrivalca prvič zadane, mu merek nanj rahlo pomaga – a nikoli ne »preskoči« na skrivalca, če lovec zadene pravi predmet (npr. kavč poleg njega).
-5. Po vsaki spremembi moraš počakati **5 s** (odštevanje je na gumbu). Skrivalec ima 2 **vabi 🎭** – lažni kopiji sebe; če lovec ustreli vabo, izgubi 5 ❤, skrivalec pa dobi +20 točk. Lovec ima **radar 📡** (vsakih 25 s): pove, koliko pravih skrivalcev je v 12 m (vab ne zazna). Za vsak ulov lovec dobi +20 ❤. Ob koncu lova opozorilo »Še 30 sekund!« in odštevanje.
+3. **Skrivanje** (30 s): skrivalec je že od začetka naključen predmet iz okolice. Če želi drugo obliko, pomeri v predmet v bližini (obrobi se zeleno) in pritisnejo **Spremeni**. Z **Zakleni** obstaneš na mestu in v isti smeri – obračaš lahko samo kamero. Lovci ta čas ne vidijo ničesar.
+4. **Lov** (3 min): lovci udarjajo sumljive predmete z **lopato ⛏** – priti morajo čisto blizu (doseg 2,6 m, 2 udarca ujameta skrivalca). Lopata zadene tudi predmet, ki je nizko pod njo, če križ meri bolj naravnost. Vsakih 30 s so imena skrivalcev 10 s vidna vsem (tudi skozi stene). Skrivalec se vsakih 25 s samodejno spremeni v naslednjo obliko – na Hiši v predmet, ki je v bližini (ob vsaki spremembi se pokadi). Udarec v pravi predmet lovcu vzame 5 življenja! Ko lovec skrivalca prvič zadane, mu merjenje nanj rahlo pomaga – a nikoli ne »preskoči« na skrivalca, če lovec zadene pravi predmet (npr. kavč poleg njega).
+5. Po vsaki spremembi moraš počakati **5 s** (odštevanje je na gumbu). Skrivalec ima 2 **vabi 🎭** – lažni kopiji sebe; če lovec ustreli vabo, izgubi 5 ❤, skrivalec pa dobi +20 točk. Lovec ima **radar 📡** (vsakih 25 s): za 5 s se pokaže zelen radarski krog z vrtečim se žarkom, na katerem pike nakažejo smer in grobo oddaljenost pravih skrivalcev v 12 m (vab ne zazna); obvestilo pove tudi smer najbližjega. Gostitelj lahko radar v čakalnici izklopi. Za vsak ulov lovec dobi +20 ❤. Ob koncu lova opozorilo »Še 30 sekund!« in odštevanje.
 6. Zmagajo lovci, če ujamejo vse skrivalce; sicer zmagajo skrivalci. Vloge se vsako rundo zamenjajo.
 
 **Točke:** ulov +100 · vsakih 10 s preživetja +10 · preživeta runda +50
@@ -59,14 +59,12 @@ Na telefonih (povezanih na **isti Wi-Fi**) odpri naslov »Omrežje«. Če se ne 
 |---|---|---|
 | Hoja | igralna palica spodaj levo | W A S D |
 | Pogled | vleci z desnim palcem | miška (klikni v igro) |
-| Strel | 🔫 (drži in vleci za merjenje) | levi klik |
-| Orožje (pištola / ostrostrelka) | 🎯 / 🔫 | 1 / 2 ali X |
-| Merek (samo ostrostrelka) | 🔭 | desni klik ali Z |
+| Zamah z lopato | ⛏ (drži in vleci za merjenje) | levi klik |
 | Radar (lovec) | 📡 | F |
 | Vaba (skrivalec) | 🎭 | G |
 | Spremeni se / Zamenjaj obliko | ✨ | E |
 | Zakleni / odkleni (stoj pri miru) | 🔓 | Q |
-| Skok / polni | ⬆ / ↻ | presledek / R |
+| Skok | ⬆ | presledek |
 | Meni | ☰ | Esc |
 
 ---

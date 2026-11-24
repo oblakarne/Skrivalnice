@@ -15,6 +15,8 @@ export interface RoomSettings {
   rounds: number;
   /** Kazen za strel v napačen predmet. */
   penalty: boolean;
+  /** Lovci imajo radar. */
+  radar: boolean;
 }
 
 export const DEFAULT_SETTINGS: Readonly<RoomSettings> = Object.freeze({
@@ -24,6 +26,7 @@ export const DEFAULT_SETTINGS: Readonly<RoomSettings> = Object.freeze({
   hunters: 0,
   rounds: 5,
   penalty: true,
+  radar: true,
 });
 
 export interface PlayerInfo {
@@ -58,10 +61,8 @@ export type PlayerSnap = [string, number, number, number, number, number, number
 
 export interface OwnState {
   hp: number;
-  /** Naboji v trenutnem orožju. */
-  ammo: number;
-  reloading: boolean;
-  weapon: 'pistol' | 'sniper';
+  /** Ms do samodejne spremembe (skrivalec) ali -1. */
+  autoShapeIn: number;
   /** Preostale vabe (skrivalec). */
   decoys: number;
 }
@@ -71,6 +72,25 @@ export interface Snapshot {
   t: number;
   p: PlayerSnap[];
   you: OwnState | null;
+  /** Imena skrivalcev so ta trenutek vidna vsem. */
+  reveal: boolean;
+  /** Ura strežnika (ms v dnevu) – za usklajeno dvigalo. */
+  clock: number;
+}
+
+/** Točka na radarju: smer (kot kot pri yaw, zaokrožen) in groba oddaljenost 0..1. */
+export interface RadarBlip {
+  a: number;
+  d: number;
+}
+
+export interface RadarResult {
+  count: number;
+  range: number;
+  x: number;
+  y: number;
+  z: number;
+  blips: RadarBlip[];
 }
 
 export type ShotKind = 'none' | 'wall' | 'prop' | 'player';

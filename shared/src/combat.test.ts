@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { resolveShot, type ShotTarget } from './combat';
-import { GUN_RANGE, GUN_RANGE_SCOPED } from './constants';
+import { resolveShot, resolveSwing, type ShotTarget } from './combat';
+import { HUNTER_EYE, SHOVEL_RANGE } from './constants';
 import { propIndex, PROPS } from './props';
 import { getWorld } from './world';
 
@@ -56,15 +56,15 @@ describe('resolveShot in pomoč pri merjenju', () => {
     expect(r.propIndex).toBe(sofaIdx);
   });
 
-  it('brez merka strel ne seže dlje od 18 m, z merkom pa do 45 m', () => {
+  it('lopata seže samo blizu (daljši doseg bi zadel)', () => {
     const far: ShotTarget = { id: 'dalec', x: 28.5, y: 0, z: 11, yaw: 0, model: propIndex('zoga') };
     const ray = shotAt(28.5, 0.2, 11, { x: 2.5, y: 1.5, z: 11 });
-    const normal = resolveShot(world, ray, GUN_RANGE, [far]);
+    const normal = resolveShot(world, ray, SHOVEL_RANGE, [far]);
     expect(normal.kind).toBe('none');
-    expect(normal.t).toBe(GUN_RANGE);
-    const scoped = resolveShot(world, ray, GUN_RANGE_SCOPED, [far]);
-    expect(scoped.kind).toBe('player');
-    expect(scoped.t).toBeGreaterThan(GUN_RANGE);
+    expect(normal.t).toBe(SHOVEL_RANGE);
+    const longer = resolveShot(world, ray, 45, [far]);
+    expect(longer.kind).toBe('player');
+    expect(longer.t).toBeGreaterThan(SHOVEL_RANGE);
   });
 
   it('na mapi Construction je strel v okras brez kazni, v predmet za skrivanje pa s kaznijo', () => {
@@ -88,5 +88,43 @@ describe('resolveShot in pomoč pri merjenju', () => {
     const kitchen: ShotTarget = { id: 'k', x: 13.0, y: 0, z: 8.5, yaw: 0, model: propIndex('zoga') };
     const r = resolveShot(world, shotAt(13.0, 0.4, 9.0, { x: 13.0, y: 1.5, z: 11.5 }), 60, [kitchen], new Set(['k']));
     expect(r.kind).toBe('wall');
+  });
+});
+
+describe('resolveSwing – zamah z lopato pokrije lok pred lovcem', () => {
+  const bearOpen: ShotTarget = { id: 'medo', x: 14.0, y: 0, z: 21.0, yaw: 0, model: propIndex('medvedek') };
+  // Lovec gleda vodoravno naprej (+z), križ je visoko nad nizkim medvedkom.
+  const swing = (hunter: { x: number; y: number; z: number }, dx: number, dz: number, targets: ShotTarget[]) => {
+    const len = Math.hypot(dx, dz);
+    const ray = { ox: hunter.x, oy: hunter.y + HUNTER_EYE, oz: hunter.z, dx: dx / len, dy: 0, dz: dz / len };
+    return resolveSwing(world, ray, hunter, targets);
+  };
+
+  it('zadene nizek predmet pod lopato, čeprav križ meri naravnost', () => {
+    const hunter = { x: 14.0, y: 0, z: 19.6 };
+    expect(resolveShot(world, { ox: 14, oy: HUNTER_EYE, oz: 19.6, dx: 0, dy: 0, dz: 1 }, SHOVEL_RANGE, [bearOpen]).kind).not.toBe('player');
+    const r = swing(hunter, 0, 1, [bearOpen]);
+    expect(r.kind).toBe('player');
+    expect(r.target).toBe('medo');
+  });
+
+  it('zadene tudi rahlo ob strani (lok), ne pa za hrbtom ali predaleč', () => {
+    expect(swing({ x: 14.6, y: 0, z: 19.8 }, 0, 1, [bearOpen]).kind).toBe('player');
+    expect(swing({ x: 14.0, y: 0, z: 19.6 }, 0, -1, [bearOpen]).kind).not.toBe('player');
+    expect(swing({ x: 14.0, y: 0, z: 18.2 }, 0, 1, [bearOpen]).kind).not.toBe('player');
+  });
+
+  it('ne zadene skozi steno', () => {
+    const kitchen: ShotTarget = { id: 'k', x: 13.0, y: 0, z: 8.5, yaw: 0, model: propIndex('zoga') };
+    expect(swing({ x: 13.0, y: 0, z: 10.4 }, 0, -1, [kitchen]).kind).not.toBe('player');
+  });
+
+  it('pravi predmet pod križem ostane zadetek predmeta (kavč ne postane skrivalec)', () => {
+    const nearSofa: ShotTarget = { ...bear, x: sofa.x - 1.3, z: 25.4 };
+    const hunter = { x: sofa.x - 0.9, y: 0, z: 23.9 };
+    const ray = shotAt(sofa.x - 0.9, 0.4, sofa.z, { x: hunter.x, y: HUNTER_EYE, z: hunter.z });
+    const r = resolveSwing(world, ray, hunter, [nearSofa]);
+    expect(r.kind).toBe('prop');
+    expect(r.propIndex).toBe(sofaIdx);
   });
 });

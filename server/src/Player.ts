@@ -1,4 +1,4 @@
-import { HP_MAX, MODEL_GHOST, WEAPONS, type PlayerInfo, type Role, type WeaponId } from '../../shared/src/index';
+import { HP_MAX, MODEL_GHOST, type PlayerInfo, type Role } from '../../shared/src/index';
 import type { GameSocket } from './types';
 
 export class Player {
@@ -24,15 +24,11 @@ export class Player {
   seq = 0;
 
   hp = HP_MAX;
-  weapon: WeaponId = 'pistol';
-  ammoBy: Record<WeaponId, number> = { pistol: WEAPONS.pistol.mag, sniper: WEAPONS.sniper.mag };
-  reloadWeapon: WeaponId = 'pistol';
-  reloadUntil = 0;
   lastShotAt = 0;
-  /** Lovec gleda skozi merek (daljši doseg strela). */
-  scoped = false;
 
   transformReadyAt = 0;
+  /** Kdaj se skrivalec samodejno spremeni v naslednjo obliko. */
+  autoShapeAt = 0;
   decoysLeft = 0;
   radarReadyAt = 0;
   surviveAccum = 0;

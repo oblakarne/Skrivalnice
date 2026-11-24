@@ -74,10 +74,7 @@ export class TouchControls {
     };
     bind('btn-jump', 'jump');
     bind('btn-transform', 'transform');
-    bind('btn-reload', 'reload');
     bind('btn-lock', 'lock');
-    bind('btn-scope', 'scope');
-    bind('btn-weapon', 'weapon');
     bind('btn-decoy', 'decoy');
     bind('btn-radar', 'radar');
   }

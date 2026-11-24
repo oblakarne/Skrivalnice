@@ -95,14 +95,6 @@ export class Network {
     this.socket.emit('shoot', s);
   }
 
-  reload(): void {
-    this.socket.emit('reload');
-  }
-
-  weapon(w: 'pistol' | 'sniper'): void {
-    this.socket.emit('weapon', w);
-  }
-
   shape(type: number): Promise<TransformResult> {
     return this.ack(() => this.socket.timeout(ACK_TIMEOUT_MS).emitWithAck('shape', type), {
       ok: false,
@@ -118,8 +110,5 @@ export class Network {
     this.socket.emit('radar');
   }
 
-  scope(on: boolean): void {
-    this.socket.emit('scope', on);
-  }
 
 }

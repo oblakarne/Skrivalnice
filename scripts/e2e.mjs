@@ -51,12 +51,17 @@ async function waitHealth() {
 }
 
 const server = spawn(process.execPath, ['server/dist/index.js'], {
-  env: { ...process.env, PORT: String(PORT), SKR_TIME_SCALE: '0.3', NODE_ENV: 'production' },
+  env: { ...process.env, PORT: String(PORT), SKR_TIME_SCALE: '0.5', NODE_ENV: 'production' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 server.stderr.on('data', (d) => {
   if (String(d).includes('DBG')) console.log(String(d).trim());
   else errors.push(`STREŽNIK: ${d}`);
+});
+
+let shuttingDown = false;
+server.on('exit', (code, sig) => {
+  if (!shuttingDown) errors.push(`STREŽNIK se je nepričakovano ustavil: koda ${code}, signal ${sig}`);
 });
 
 const browsers = [];
@@ -94,6 +99,21 @@ async function shot(page, name) {
 
 const visible = (id) => `!document.getElementById('${id}').classList.contains('hidden')`;
 
+// Odzivnost strežnika: najdaljši čas odgovora na /health (pokaže, ali strežnik zastaja).
+let healthMax = 0;
+let healthSlow = [];
+const healthTimer = setInterval(async () => {
+  const t0 = Date.now();
+  try {
+    await fetch(`${BASE}/health`);
+  } catch {
+    return;
+  }
+  const dt = Date.now() - t0;
+  if (dt > healthMax) healthMax = dt;
+  if (dt > 2000) healthSlow.push(`${new Date().toISOString().slice(11, 19)} ${dt}ms`);
+}, 1000);
+
 try {
   await waitHealth();
   log('strežnik teče, brskalnik:', executablePath);
@@ -101,10 +121,10 @@ try {
   // ---------- Igralec A: računalnik
   const bA = await launch();
   const a = await bA.newPage();
-  await a.setViewport({ width: 960, height: 540 });
+  await a.setViewport({ width: 800, height: 450 });
   watch(a, 'PC');
   await lowQuality(a);
-  await a.goto(`${BASE}/?debug=1`, { waitUntil: 'networkidle0' });
+  await a.goto(`${BASE}/?debug=1&fps=15`, { waitUntil: 'networkidle0' });
   await shot(a, '01-domov-pc');
   await a.type('#inp-name', 'Ana');
   await a.click('#btn-create');
@@ -121,7 +141,7 @@ try {
   await b.setViewport({ width: 844, height: 390, deviceScaleFactor: 1, isMobile: true, hasTouch: true, isLandscape: true });
   watch(b, 'TELEFON');
   await lowQuality(b);
-  await b.goto(`${BASE}/?debug=1&soba=${code}`, { waitUntil: 'networkidle0' });
+  await b.goto(`${BASE}/?debug=1&fps=15&soba=${code}`, { waitUntil: 'networkidle0' });
   const prefilled = await b.$eval('#inp-code', (e) => e.value);
   if (prefilled !== code) fail(`Koda iz povezave ni izpolnjena (${prefilled})`);
   await shot(b, '02-domov-telefon');
@@ -135,11 +155,35 @@ try {
   // Nastavitve in začetek
   await a.select('#set-map', MAP);
   await b.waitForFunction((m) => document.getElementById('set-map').value === m, { timeout: 5000 }, MAP);
-  await a.select('#set-hide', '20');
+  await a.select('#set-hide', '45');
   await a.select('#set-hunt', '120');
-  await b.waitForFunction(() => document.getElementById('set-hide').value === '20', { timeout: 5000 });
+  await b.waitForFunction(() => document.getElementById('set-hide').value === '45', { timeout: 5000 });
   const disabledForGuest = await b.$eval('#set-hide', (e) => e.disabled);
   if (!disabledForGuest) fail('Gost lahko spreminja nastavitve');
+  // Dnevnik vseh obvestil (toast) na obeh straneh – za diagnostiko.
+  for (const pg of [a, b]) {
+    await pg.evaluate(() => {
+      const g = window.__skr.game;
+      const orig = g.hooks.toast;
+      window.__toastLog = [];
+      g.hooks.toast = (m) => {
+        window.__toastLog.push(Math.round(performance.now()) + ' ' + m);
+        orig(m);
+      };
+      const s = window.__skr.net.socket;
+      s.on('disconnect', (reason) => window.__toastLog.push(Math.round(performance.now()) + ' DISCONNECT ' + reason));
+      s.io.on('reconnect_attempt', (n) => window.__toastLog.push(Math.round(performance.now()) + ' RECONNECT_ATTEMPT ' + n));
+      s.on('connect', () => window.__toastLog.push(Math.round(performance.now()) + ' CONNECT'));
+      // Najdaljša zamrznitev glavne niti (ms) – pokaže, ali brskalnik "zastane".
+      window.__maxGap = 0;
+      let last = performance.now();
+      setInterval(() => {
+        const n = performance.now();
+        window.__maxGap = Math.max(window.__maxGap, n - last);
+        last = n;
+      }, 100);
+    });
+  }
   // Dnevnik sprememb sobe (faza, runda, moja vloga, zmagovalec) na PC strani.
   await a.evaluate(() => {
     window.__roundLog = [];
@@ -180,13 +224,19 @@ try {
       ),
     ),
   );
-  log('mapa:', MAP, '| FPS (programsko upodabljanje): PC', fps[0], ', telefon', fps[1]);
+  const tris = await b.evaluate(() => window.__skr.game.renderer.info.render.triangles);
+  log('mapa:', MAP, '| FPS (programsko upodabljanje): PC', fps[0], ', telefon', fps[1], '| trikotnikov v sliki:', tris);
   if (new Set([roleA, roleB]).size !== 2) fail('Vlogi nista pravilno razdeljeni');
   const hunter = roleA === 'hunter' ? a : b;
   const prop = hunter === a ? b : a;
   const propIsPhone = prop === b;
 
-  if (!(await hunter.evaluate(visible('blind')))) fail('Lovec med skrivanjem ni zatemnjen');
+  if (MAP === 'construction') {
+    // Lovec čaka v zaprti sobi (ni zatemnjen), vrata so zaprta.
+    if (await hunter.evaluate(visible('blind'))) fail('Na Construction lovec ne sme biti zatemnjen');
+    const gatesY = await hunter.evaluate(() => window.__skr.game.worldView.gates.position.y);
+    if (gatesY > 0.5) fail('Vrata sobe lovcev so med skrivanjem odprta');
+  } else if (!(await hunter.evaluate(visible('blind')))) fail('Lovec med skrivanjem ni zatemnjen');
   await shot(hunter, '04-lovec-skrivanje');
   await shot(prop, '05-skrivalec-skrivanje');
 
@@ -212,6 +262,11 @@ try {
     log('seznam predmetov:', await prop.$eval('#transform-list', (e) => e.textContent));
   }
 
+  // Skrivalec je že ob začetku predmet (ne bel duh).
+  const startModel = await prop.evaluate(() => window.__skr.game.model);
+  log('začetna oblika skrivalca:', startModel);
+  if (!(startModel > 0)) fail('Skrivalec ob začetku ni predmet');
+
   // Skrivalec: premik z joystickom (če je telefon) ali tipkovnico.
   const before = await prop.evaluate(() => ({ x: window.__skr.game.body.x, z: window.__skr.game.body.z }));
   if (propIsPhone) {
@@ -234,26 +289,28 @@ try {
   const tr = await prop.evaluate(async () => {
     const { game, input } = window.__skr;
     const world = window.__skr.getWorld();
+    const m0 = game.model;
     if (world.transformable) {
       // Nabor oblik: gumb Zamenjaj brez merjenja.
       input.trigger('transform');
-      for (let i = 0; i < 60 && game.model === 0; i++) await new Promise((r) => setTimeout(r, 100));
+      for (let i = 0; i < 60 && game.model === m0; i++) await new Promise((r) => setTimeout(r, 100));
       const label = document.getElementById('transform-list').textContent;
       const toasts = [...document.querySelectorAll('#toasts .toast')].map((t) => t.textContent);
       const b = game.body;
-      return { ok: world.transformable.has(game.model), model: game.model, label, toasts, pos: [b.x, b.y, b.z] };
+      return { ok: world.transformable.has(game.model) && game.model !== m0, m0, model: game.model, label, toasts, pos: [b.x, b.y, b.z] };
     }
     const bx = game.body.x;
     const bz = game.body.z;
     const order = world.map.props
       .map((p, i) => ({ i, d: Math.hypot(p.x - bx, p.z - bz), p }))
-      .filter((e) => e.p.y < 1 && (!world.transformable || world.transformable.has(e.p.type)))
+      .filter((e) => e.p.y < 1 && e.p.type !== m0 && (!world.transformable || world.transformable.has(e.p.type)))
       .sort((u, v) => u.d - v.d)
-      .slice(0, 4);
+      .filter((e) => e.d < 4.2)
+      .slice(0, 14);
     for (const { i } of order) {
       const p = world.map.props[i];
       const yaw = Math.atan2(-(p.x - bx), -(p.z - bz));
-      for (const pitch of [-0.35, -0.2, -0.5, -0.1, -0.7]) {
+      for (const pitch of [-0.35, -0.2, -0.55, -0.8]) {
         game.camYaw = yaw;
         game.camPitch = pitch;
         await new Promise((r) => setTimeout(r, 350));
@@ -265,10 +322,10 @@ try {
     const label = document.getElementById('target-label').textContent;
     input.trigger('transform');
     const t0 = performance.now();
-    for (let i = 0; i < 70 && game.model === 0; i++) await new Promise((r) => setTimeout(r, 100));
+    for (let i = 0; i < 70 && game.model === m0; i++) await new Promise((r) => setTimeout(r, 100));
     window.__transformMs = performance.now() - t0;
     const toasts = [...document.querySelectorAll('#toasts .toast')].map((t) => t.textContent);
-    return { ok: game.model > 0, model: game.model, label, toasts, target: game.target, pending: game.transformPending, readyIn: game.transformReadyAt - performance.now(), connected: window.__skr.net.socket.connected, phase: game.phase, ms: Math.round(window.__transformMs), transport: window.__skr.net.socket.io.engine.transport.name };
+    return { ok: game.model > 0 && game.model !== m0, m0, model: game.model, label, toasts, target: game.target, pending: game.transformPending, readyIn: game.transformReadyAt - performance.now(), connected: window.__skr.net.socket.connected, phase: game.phase, ms: Math.round(window.__transformMs), toastLog: window.__toastLog, transport: window.__skr.net.socket.io.engine.transport.name };
   });
   log('sprememba:', JSON.stringify(tr));
   if (!tr.ok) fail('Skrivalec se ni spremenil v predmet');
@@ -276,8 +333,12 @@ try {
 
   // Zaklep: skrivalec stoji pri miru, kamera se lahko obrača.
   await prop.evaluate(() => window.__skr.input.trigger('lock'));
-  await prop.waitForFunction(() => window.__skr.game.locked === true, { timeout: 3000, polling: 100 });
-  await prop.waitForFunction(visible('lock-badge'), { timeout: 3000, polling: 100 });
+  const lockDiag = async (what) => {
+    const d = await prop.evaluate(() => ({ locked: window.__skr.game.locked, role: window.__skr.game.role, alive: window.__skr.game.alive, phase: window.__skr.game.phase, toastLog: window.__toastLog }));
+    fail(`Zaklep: ${what} – ${JSON.stringify(d)}`);
+  };
+  await prop.waitForFunction(() => window.__skr.game.locked === true, { timeout: 6000, polling: 100 }).catch(() => lockDiag('ni zaklenjen'));
+  await prop.waitForFunction(visible('lock-badge'), { timeout: 6000, polling: 100 }).catch(() => lockDiag('ni značke'));
   const lockStart = await prop.evaluate(() => ({
     x: window.__skr.game.body.x,
     z: window.__skr.game.body.z,
@@ -313,36 +374,64 @@ try {
   // Vaba: kopija skrivalca, odšteje se od 2.
   if (propIsPhone) await b.tap('#btn-decoy');
   else await a.evaluate(() => window.__skr.input.trigger('decoy'));
-  await prop.waitForFunction(() => window.__skr.game.decoysLeft === 1, { timeout: 6000, polling: 100 });
-  await hunter.waitForFunction(() => [...window.__skr.game.remotes.map.keys()].some((id) => id.startsWith('d')) || window.__skr.game.phase === 'hiding', { timeout: 6000, polling: 100 });
+  const decoyDiag = async (what) => {
+    const d = await prop.evaluate(() => ({
+      left: window.__skr.game.decoysLeft,
+      phase: window.__skr.game.phase,
+      model: window.__skr.game.model,
+      connected: window.__skr.net.socket.connected,
+      toasts: [...document.querySelectorAll('.toast')].map((t) => t.textContent),
+    }));
+    const h = await hunter.evaluate(() => ({
+      phase: window.__skr.game.phase,
+      remotes: [...window.__skr.game.remotes.map.keys()],
+      connected: window.__skr.net.socket.connected,
+    }));
+    fail(`Vaba: ${what} – skrivalec ${JSON.stringify(d)}, lovec ${JSON.stringify(h)}`);
+  };
+  await prop.waitForFunction(() => window.__skr.game.decoysLeft === 1, { timeout: 12000, polling: 100 }).catch(() => decoyDiag('gumb ni deloval'));
+  await hunter
+    .waitForFunction(() => [...window.__skr.game.remotes.map.keys()].some((id) => id.startsWith('d')) || window.__skr.game.phase === 'hiding', { timeout: 12000, polling: 100 })
+    .catch(() => decoyDiag('lovec je ne vidi'));
   log('vaba postavljena')
 
   // Lov
-  await hunter.waitForFunction(() => window.__skr.game.phase === 'hunting', { timeout: 15000, polling: 100 });
+  await hunter.waitForFunction(() => window.__skr.game.phase === 'hunting', { timeout: 25000, polling: 100 });
   await sleep(400);
   if (await hunter.evaluate(visible('blind'))) fail('Lovec je med lovom še vedno zatemnjen');
   await shot(hunter, '07-lovec-lov');
 
-  // Ostrostrelka in merek: približan pogled (manjši zorni kot), nato nazaj.
-  if (hunter === b) await b.tap('#btn-weapon');
-  else await a.evaluate(() => window.__skr.input.trigger('weapon2'));
-  await hunter.waitForFunction(() => window.__skr.game.weapon === 'sniper', { timeout: 5000, polling: 100 });
-  await sleep(400);
-  if (hunter === b) await b.tap('#btn-scope');
-  else await a.evaluate(() => window.__skr.input.trigger('scope'));
-  await hunter.waitForFunction(() => window.__skr.game.camera.fov < 40, { timeout: 5000, polling: 100 });
-  if (!(await hunter.evaluate(visible('scope-overlay')))) fail('Merek se ne prikaže');
-  await shot(hunter, '07b-lovec-merek');
-  if (hunter === b) await b.tap('#btn-scope');
-  else await a.evaluate(() => window.__skr.input.trigger('scope'));
-  await hunter.waitForFunction(() => window.__skr.game.camera.fov > 60, { timeout: 5000, polling: 100 });
-  log('merek deluje (zoom in nazaj)');
+  if (MAP === 'construction') {
+    // Vrata sobe lovcev se ob lovu odprejo (dvignejo).
+    await hunter.waitForFunction(() => window.__skr.game.worldView.gates.position.y > 2.5, { timeout: 8000, polling: 100 });
+    log('vrata sobe lovcev odprta');
+  }
 
   // Radar
+  await hunter.evaluate(() => {
+    window.__radar = null;
+    window.__skr.net.socket.once('radar', (r) => (window.__radar = r));
+  });
   if (hunter === b) await b.tap('#btn-radar');
   else await a.evaluate(() => window.__skr.input.trigger('radar'));
-  await hunter.waitForFunction(() => document.getElementById('banner').textContent.includes('Radar'), { timeout: 6000, polling: 100 });
-  log('radar:', await hunter.$eval('#banner', (e) => e.textContent));
+  await hunter.waitForFunction(() => window.__radar !== null, { timeout: 8000, polling: 100 });
+  await hunter.waitForFunction(() => [...document.querySelectorAll('#toasts .toast')].some((t) => t.textContent.includes('Radar')), { timeout: 4000, polling: 100 });
+  log('radar:', JSON.stringify(await hunter.evaluate(() => window.__radar)));
+  // Radarski zaslon (zelen krog z žarkom) je viden nekaj sekund.
+  await hunter.waitForFunction(visible('radar-view'), { timeout: 4000, polling: 100 }).catch(() => fail('Radarski zaslon se ni prikazal'));
+  await sleep(900);
+  await shot(hunter, '07b-radar');
+  // Preizkus smeri: en skrivalec naravnost (blizu), drugi desno (daleč) -> namig "naravnost".
+  await hunter.evaluate(() => {
+    const g = window.__skr.game;
+    const y = g.camYaw;
+    g.onRadar({ count: 2, range: 12, x: 0, y: -50, z: 0, blips: [{ a: y, d: 1 / 3 }, { a: y - Math.PI / 2, d: 1 }] });
+  });
+  await hunter
+    .waitForFunction(() => [...document.querySelectorAll('#toasts .toast')].some((t) => t.textContent.includes('najbližji: naravnost')), { timeout: 4000, polling: 100 })
+    .catch(() => fail('Radar ne pokaže pravilne smeri'));
+  await sleep(1600);
+  await shot(hunter, '07c-radar-pike');
 
   // Strel (dotik na telefonu ali miška/kavelj na PC)
   if (hunter === b) {
@@ -359,15 +448,15 @@ try {
     await a.evaluate(() => (window.__skr.input.fireHeld = false));
   }
   await sleep(500);
-  const ammo = await hunter.evaluate(() => window.__skr.game.ammo);
-  log('naboji po streljanju:', ammo);
-  if (ammo >= 12) fail('Lovec ni ustrelil');
-  await shot(hunter, '08-lovec-strel');
+  const swings = await hunter.evaluate(() => window.__skr.game.swingCount);
+  log('zamahi z lopato:', swings);
+  if (swings < 1) fail('Lovec ni zamahnil z lopato');
+  await shot(hunter, '08-lovec-lopata');
 
   // Konec runde (skrivalec preživi). Okno je kratko (pospešen čas), zato beležimo
   // dogodke sobe namesto lovljenja okna – programsko upodabljanje je lahko zelo počasno.
   await a.waitForFunction(() => window.__roundLog.some((e) => e.phase === 'roundEnd' && e.round === 1), {
-    timeout: 70000,
+    timeout: 120000,
     polling: 100,
   });
   if (await a.evaluate(visible('screen-roundend'))) await shot(a, '09-konec-runde-pc');
@@ -441,6 +530,8 @@ try {
                 gameRound: g?.round,
                 gamePhase: g?.phase,
                 connected: window.__skr.net.socket.connected,
+                maxGapMs: Math.round(window.__maxGap ?? -1),
+                log: window.__toastLog,
               }
             : null;
         })
@@ -450,6 +541,9 @@ try {
   }
   process.exitCode = 1;
 } finally {
+  clearInterval(healthTimer);
+  log('odzivnost strežnika: najdaljši odgovor', healthMax, 'ms', healthSlow.length ? '| počasni: ' + healthSlow.join(', ') : '');
+  shuttingDown = true;
   for (const b of browsers) await b.close().catch(() => undefined);
   server.kill();
 }

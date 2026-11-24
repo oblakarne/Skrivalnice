@@ -35,8 +35,10 @@ export class RemotePlayer {
 
   constructor(readonly id: string) {}
 
-  setModel(model: number): void {
-    if (model === this.model) return;
+  /** Vrne true, če se je oblika spremenila (ne ob prvem prikazu). */
+  setModel(model: number): boolean {
+    if (model === this.model) return false;
+    const changed = !Number.isNaN(this.model);
     this.model = model;
     if (this.body) this.group.remove(this.body);
     if (model === MODEL_HUNTER) {
@@ -47,18 +49,22 @@ export class RemotePlayer {
       this.body = propMesh(model);
     }
     this.group.add(this.body);
+    return changed;
   }
 
-  setTag(text: string, color: string, height: number): void {
-    if (text !== this.tagText) {
+  setTag(text: string, color: string, height: number, xray = false): void {
+    const key = text + '|' + color + '|' + xray;
+    if (key !== this.tagText) {
       if (this.tag) {
         this.group.remove(this.tag);
         disposeSprite(this.tag);
         this.tag = null;
       }
-      this.tagText = text;
+      this.tagText = key;
       if (text) {
         this.tag = nameTag(text, color);
+        // Med razkrivanjem so imena vidna tudi skozi stene.
+        this.tag.material.depthTest = !xray;
         this.group.add(this.tag);
       }
     }
@@ -141,7 +147,11 @@ export class RemotePlayers {
   }
 
   /** Posodobi seznam iz posnetka; vrne igralce, ki so pravkar umrli. */
+  /** Spremenjene oblike v zadnjem apply (za dim). */
+  changed: RemotePlayer[] = [];
+
   apply(snaps: PlayerSnap[], myId: string, now: number): RemotePlayer[] {
+    this.changed = [];
     const seen = new Set<string>();
     const died: RemotePlayer[] = [];
     for (const s of snaps) {
@@ -155,7 +165,7 @@ export class RemotePlayers {
         this.map.set(id, rp);
         this.scene.add(rp.group);
       }
-      rp.setModel(s[6]);
+      if (rp.setModel(s[6]) && rp.alive && s[7] === 1) this.changed.push(rp);
       const alive = s[7] === 1;
       if (rp.alive && !alive && !fresh) died.push(rp);
       rp.alive = alive;

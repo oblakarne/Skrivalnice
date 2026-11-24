@@ -1,6 +1,7 @@
 // Gradnja 3D modelov iz podatkov kataloga (vsak predmet = ena geometrija z barvami oglišč).
 
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PROPS, type Part } from '../../../shared/src/index';
 
@@ -8,18 +9,37 @@ export const VERTEX_MATERIAL = new THREE.MeshLambertMaterial({ vertexColors: tru
 
 const tmpColor = new THREE.Color();
 
+/**
+ * Kvader z zaobljenimi robovi (mehkejši, manj "kockast" videz). Zelo tanki deli
+ * (črte, okna) ostanejo ostri.
+ */
+export function roundedBox(w: number, h: number, d: number, maxRadius = 0.06): THREE.BufferGeometry {
+  const min = Math.min(w, h, d);
+  if (min < 0.025) return new THREE.BoxGeometry(w, h, d);
+  const r = Math.min(maxRadius, min * 0.28);
+  return new RoundedBoxGeometry(w, h, d, 1, r);
+}
+
 function partGeometry(part: Part): THREE.BufferGeometry {
   let g: THREE.BufferGeometry;
   if (part.k === 'box') {
-    g = new THREE.BoxGeometry(part.s[0], part.s[1], part.s[2]);
+    g = roundedBox(part.s[0], part.s[1], part.s[2]);
   } else if (part.k === 'cyl') {
-    const seg = Math.max(part.rt, part.rb) > 0.15 ? 16 : 10;
+    const seg = Math.max(part.rt, part.rb) > 0.15 ? 24 : 14;
     g = new THREE.CylinderGeometry(part.rt, part.rb, part.h, seg);
+  } else if (part.k === 'lathe') {
+    g = new THREE.LatheGeometry(
+      part.pts.map(([r, y]) => new THREE.Vector2(r, y)),
+      24,
+    );
+  } else if (part.k === 'torus') {
+    g = new THREE.TorusGeometry(part.R, part.t, 12, 28);
+    g.rotateX(Math.PI / 2);
   } else {
-    g = new THREE.SphereGeometry(part.rad, 14, 10);
+    g = new THREE.SphereGeometry(part.rad, 16, 11);
     if (part.sc) g.scale(part.sc[0], part.sc[1], part.sc[2]);
   }
-  const rot = part.k !== 'sph' && part.r ? part.r : null;
+  const rot = (part.k === 'box' || part.k === 'cyl') && part.r ? part.r : null;
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   if (rot) q.setFromEuler(new THREE.Euler(rot[0], rot[1], rot[2], 'XYZ'));
@@ -43,7 +63,17 @@ export function withColor(g: THREE.BufferGeometry, hex: number): THREE.BufferGeo
 }
 
 export function mergeParts(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  const merged = mergeGeometries(geos, false);
+  // Vsi deli morajo biti enaki: z indeksi ali brez; poenotimo in obdržimo samo skupne atribute.
+  const anyNonIndexed = geos.some((g) => !g.index);
+  const parts = geos.map((g) => {
+    const n = anyNonIndexed && g.index ? g.toNonIndexed() : g;
+    for (const name of Object.keys(n.attributes)) {
+      if (name !== 'position' && name !== 'normal' && name !== 'color') n.deleteAttribute(name);
+    }
+    return n;
+  });
+  const merged = mergeGeometries(parts, false);
+  for (const g of parts) g.dispose();
   for (const g of geos) g.dispose();
   if (!merged) throw new Error('Združevanje geometrije ni uspelo');
   merged.computeBoundingSphere();
@@ -87,7 +117,7 @@ export function propMesh(type: number): THREE.Mesh {
 
 
 function box(w: number, h: number, d: number, x: number, y: number, z: number, c: number): THREE.BufferGeometry {
-  const g = new THREE.BoxGeometry(w, h, d);
+  const g = roundedBox(w, h, d, 0.04);
   g.translate(x, y, z);
   return withColor(g, c);
 }
@@ -97,8 +127,7 @@ interface HunterGeos {
   leg: THREE.BufferGeometry;
   arm: THREE.BufferGeometry;
   sleeve: THREE.BufferGeometry;
-  pistol: THREE.BufferGeometry;
-  sniper: THREE.BufferGeometry;
+  shovel: THREE.BufferGeometry;
 }
 let hunterGeos: HunterGeos | null = null;
 
@@ -110,9 +139,6 @@ function hunterGeometries(): HunterGeos {
     cap.translate(0, 1.63, 0);
     const visor = new THREE.BoxGeometry(0.22, 0.03, 0.14);
     visor.translate(0, 1.6, -0.2);
-    const scope = new THREE.CylinderGeometry(0.035, 0.035, 0.3, 10);
-    scope.rotateX(Math.PI / 2);
-    scope.translate(0, 0.07, -0.55);
     hunterGeos = {
       // Trup in glava (noge in roke so posebej, da se lahko premikajo)
       body: mergeParts([
@@ -130,13 +156,12 @@ function hunterGeometries(): HunterGeos {
       arm: mergeParts([box(0.12, 0.46, 0.14, 0, -0.23, 0, 0x3d6b4a), box(0.1, 0.1, 0.1, 0, -0.5, 0, 0xf0c8a0)]),
       // Desna roka (rokav) drži orožje
       sleeve: mergeParts([box(0.12, 0.12, 0.42, 0, -0.05, -0.2, 0x3d6b4a), box(0.1, 0.1, 0.1, 0, -0.05, -0.44, 0xf0c8a0)]),
-      // Pištola: kratka
-      pistol: mergeParts([box(0.07, 0.1, 0.3, 0, 0.0, -0.58, 0x2a2a2a), box(0.05, 0.14, 0.06, 0, -0.1, -0.48, 0x1a1a1a)]),
-      // Ostrostrelka: dolga cev, kopito in merek
-      sniper: mergeParts([
-        box(0.09, 0.12, 0.5, 0, -0.03, -0.45, 0x5a3b22),
-        box(0.05, 0.05, 1.0, 0, 0.0, -1.1, 0x1a1a1a),
-        withColor(scope, 0x111111),
+      // Lopata: ročaj in list (držalo v desni roki, list spredaj)
+      shovel: mergeParts([
+        box(0.14, 0.05, 0.05, 0, -0.05, -0.42, 0x3a2a1a),
+        box(0.05, 0.05, 1.05, 0, -0.05, -0.92, 0x8b5a2b),
+        box(0.3, 0.035, 0.34, 0, -0.07, -1.58, 0x9aa0a6),
+        box(0.32, 0.06, 0.05, 0, -0.06, -1.42, 0x6b7076),
       ]),
     };
   }
@@ -146,11 +171,15 @@ function hunterGeometries(): HunterGeos {
 export interface HunterModel {
   group: THREE.Group;
   gunPivot: THREE.Object3D;
+  /** Konica lopate (za iskre ob udarcu). */
   muzzle: THREE.Object3D;
-  setWeapon: (w: 'pistol' | 'sniper') => void;
+  /** Zamah z lopato (animacija). */
+  swing: () => void;
   /** Animacija hoje: faza korakov in jakost (0 = stoji, 1 = teče). */
   animate: (phase: number, amount: number) => void;
 }
+
+const SWING_MS = 380;
 
 export function hunterModel(): HunterModel {
   const g = hunterGeometries();
@@ -166,30 +195,36 @@ export function hunterModel(): HunterModel {
   const legL = limb(g.leg, -0.11, 0.8);
   const legR = limb(g.leg, 0.11, 0.8);
   const armL = limb(g.arm, -0.3, 1.32);
+  // gunPivot sledi pogledu gor/dol, swingPivot doda zamah
   const gunPivot = new THREE.Object3D();
   gunPivot.position.set(0.3, 1.3, 0);
-  gunPivot.add(new THREE.Mesh(g.sleeve, VERTEX_MATERIAL));
-  const pistol = new THREE.Mesh(g.pistol, VERTEX_MATERIAL);
-  const sniper = new THREE.Mesh(g.sniper, VERTEX_MATERIAL);
-  gunPivot.add(pistol, sniper);
+  const swingPivot = new THREE.Object3D();
+  gunPivot.add(swingPivot);
+  swingPivot.add(new THREE.Mesh(g.sleeve, VERTEX_MATERIAL));
+  swingPivot.add(new THREE.Mesh(g.shovel, VERTEX_MATERIAL));
   const muzzle = new THREE.Object3D();
-  gunPivot.add(muzzle);
+  muzzle.position.set(0, -0.07, -1.6);
+  swingPivot.add(muzzle);
   group.add(gunPivot);
-  const setWeapon = (w: 'pistol' | 'sniper'): void => {
-    pistol.visible = w === 'pistol';
-    sniper.visible = w === 'sniper';
-    muzzle.position.set(0, 0, w === 'pistol' ? -0.75 : -1.62);
+  let swingStart = -1e9;
+  const swing = (): void => {
+    swingStart = performance.now();
   };
-  setWeapon('pistol');
   const animate = (phase: number, amount: number): void => {
     const s = Math.sin(phase) * amount;
     legL.rotation.x = s * 0.7;
     legR.rotation.x = -s * 0.7;
     armL.rotation.x = -s * 0.6;
-    // Rahlo pozibavanje telesa
     group.children[0]!.position.y = Math.abs(Math.cos(phase)) * 0.04 * amount;
+    // Zamah: najprej dvig nad glavo, nato hiter udarec navzdol
+    const k = (performance.now() - swingStart) / SWING_MS;
+    if (k >= 0 && k < 1) {
+      swingPivot.rotation.x = k < 0.35 ? (k / 0.35) * 1.4 : 1.4 - ((k - 0.35) / 0.65) * 2.2;
+    } else {
+      swingPivot.rotation.x = 0;
+    }
   };
-  return { group, gunPivot, muzzle, setWeapon, animate };
+  return { group, gunPivot, muzzle, swing, animate };
 }
 // ---------------------------------------------------------------- napisi
 

@@ -6,7 +6,11 @@ export type Vec3 = [number, number, number];
 export type Part =
   | { k: 'box'; s: Vec3; p: Vec3; r?: Vec3; c: number }
   | { k: 'cyl'; rt: number; rb: number; h: number; p: Vec3; r?: Vec3; c: number }
-  | { k: 'sph'; rad: number; p: Vec3; sc?: Vec3; c: number };
+  | { k: 'sph'; rad: number; p: Vec3; sc?: Vec3; c: number }
+  /** Vrtenina: profil [polmer, višina] okoli osi Y (sodi, lonci, vedra …). */
+  | { k: 'lathe'; pts: [number, number][]; p: Vec3; c: number }
+  /** Obroč (npr. guma): R = polmer obroča, t = debelina; leži vodoravno. */
+  | { k: 'torus'; R: number; t: number; p: Vec3; c: number };
 
 export interface PropDef {
   id: string;
@@ -30,6 +34,18 @@ const METAL = 0xb8bcc2;
 const DARK = 0x2a2a2a;
 const GLASS = 0x2e3d4f;
 const CARDBOARD = 0xc49a6c;
+/** Profil soda: izbočen trup. */
+const BARREL: [number, number][] = [
+  [0, 0],
+  [0.255, 0],
+  [0.28, 0.08],
+  [0.3, 0.25],
+  [0.305, 0.45],
+  [0.3, 0.65],
+  [0.28, 0.82],
+  [0.255, 0.9],
+  [0, 0.9],
+];
 
 function box(s: Vec3, p: Vec3, c: number, r?: Vec3): Part {
   return r ? { k: 'box', s, p, c, r } : { k: 'box', s, p, c };
@@ -40,11 +56,17 @@ function cyl(rt: number, rb: number, h: number, p: Vec3, c: number, r?: Vec3): P
 function sph(rad: number, p: Vec3, c: number, sc?: Vec3): Part {
   return sc ? { k: 'sph', rad, p, c, sc } : { k: 'sph', rad, p, c };
 }
-/** Štiri noge na vogalih. */
+function lathe(pts: [number, number][], p: Vec3, c: number): Part {
+  return { k: 'lathe', pts, p, c };
+}
+function torus(R: number, t: number, p: Vec3, c: number): Part {
+  return { k: 'torus', R, t, p, c };
+}
+/** Štiri noge na vogalih (okrogle, rahlo zožene navzdol). */
 function legs(sx: number, h: number, ox: number, oz: number, c: number, y0 = 0): Part[] {
   const out: Part[] = [];
   for (const dx of [-1, 1]) {
-    for (const dz of [-1, 1]) out.push(box([sx, h, sx], [dx * ox, y0 + h / 2, dz * oz], c));
+    for (const dz of [-1, 1]) out.push(cyl(sx / 2, sx * 0.38, h, [dx * ox, y0 + h / 2, dz * oz], c));
   }
   return out;
 }
@@ -82,8 +104,11 @@ const RAW: RawProp[] = [
     parts: [
       ...legs(0.06, 0.05, 0.94, 0.4, DARK),
       box([2.0, 0.25, 0.9], [0, 0.175, 0], 0x4a6fa5),
-      box([1.6, 0.15, 0.7], [0, 0.375, -0.07], 0x5b80b8),
+      box([0.79, 0.16, 0.7], [-0.4, 0.38, -0.07], 0x5b80b8),
+      box([0.79, 0.16, 0.7], [0.4, 0.38, -0.07], 0x5b80b8),
       box([2.0, 0.5, 0.2], [0, 0.55, 0.35], 0x4a6fa5),
+      box([0.78, 0.38, 0.14], [-0.4, 0.6, 0.2], 0x5b80b8),
+      box([0.78, 0.38, 0.14], [0.4, 0.6, 0.2], 0x5b80b8),
       box([0.2, 0.6, 0.9], [-0.9, 0.35, 0], 0x42639a),
       box([0.2, 0.6, 0.9], [0.9, 0.35, 0], 0x42639a),
     ],
@@ -136,16 +161,16 @@ const RAW: RawProp[] = [
     id: 'svetilka',
     name: 'Svetilka',
     parts: [
-      cyl(0.18, 0.2, 0.04, [0, 0.02, 0], 0x444444),
+      lathe([[0, 0], [0.2, 0], [0.2, 0.012], [0.12, 0.035], [0.04, 0.045], [0, 0.045]], [0, 0, 0], 0x444444),
       cyl(0.025, 0.025, 1.4, [0, 0.74, 0], METAL),
-      cyl(0.15, 0.25, 0.3, [0, 1.5, 0], 0xf3e3b5),
+      lathe([[0.25, 0], [0.24, 0.03], [0.17, 0.27], [0.15, 0.3], [0.14, 0.3], [0.23, 0.02], [0.24, 0]], [0, 1.35, 0], 0xf3e3b5),
     ],
   },
   {
     id: 'rastlina',
     name: 'Rastlina',
     parts: [
-      cyl(0.2, 0.15, 0.35, [0, 0.175, 0], 0xc0643a),
+      lathe([[0, 0], [0.14, 0], [0.15, 0.02], [0.185, 0.29], [0.2, 0.3], [0.2, 0.35], [0.18, 0.35], [0.17, 0.31], [0, 0.31]], [0, 0, 0], 0xc0643a),
       cyl(0.18, 0.18, 0.02, [0, 0.34, 0], 0x4a3020),
       sph(0.3, [0, 0.6, 0], 0x3f8f3f, [1, 1.2, 1]),
       sph(0.2, [0.12, 0.85, 0.05], 0x5fb55f),
@@ -161,15 +186,19 @@ const RAW: RawProp[] = [
     id: 'sod',
     name: 'Sod',
     parts: [
-      cyl(0.3, 0.3, 0.9, [0, 0.45, 0], 0x2f5f9f),
-      cyl(0.305, 0.305, 0.04, [0, 0.2, 0], 0x23476f),
-      cyl(0.305, 0.305, 0.04, [0, 0.7, 0], 0x23476f),
+      lathe(BARREL, [0, 0, 0], 0x2f5f9f),
+      cyl(0.3, 0.3, 0.04, [0, 0.2, 0], 0x23476f),
+      cyl(0.3, 0.3, 0.04, [0, 0.7, 0], 0x23476f),
+      cyl(0.24, 0.24, 0.006, [0, 0.9, 0], 0x23476f),
     ],
   },
   {
     id: 'vedro',
     name: 'Vedro',
-    parts: [cyl(0.16, 0.12, 0.28, [0, 0.14, 0], 0xc03a3a), cyl(0.145, 0.145, 0.005, [0, 0.2775, 0], 0x6a1f1f)],
+    parts: [
+      lathe([[0, 0], [0.12, 0], [0.155, 0.26], [0.16, 0.28], [0.148, 0.28], [0.115, 0.03], [0, 0.03]], [0, 0, 0], 0xc03a3a),
+      cyl(0.112, 0.112, 0.004, [0, 0.033, 0], 0x6a1f1f),
+    ],
   },
   {
     id: 'stozec',
@@ -189,8 +218,8 @@ const RAW: RawProp[] = [
     id: 'lonec',
     name: 'Lonec',
     parts: [
-      cyl(0.18, 0.18, 0.18, [0, 0.09, 0], METAL),
-      cyl(0.185, 0.185, 0.02, [0, 0.19, 0], 0x9aa0a6),
+      lathe([[0, 0], [0.15, 0], [0.175, 0.02], [0.18, 0.06], [0.18, 0.17], [0, 0.17]], [0, 0, 0], METAL),
+      lathe([[0, 0], [0.185, 0], [0.17, 0.012], [0.08, 0.03], [0, 0.032]], [0, 0.17, 0], 0x9aa0a6),
       sph(0.03, [0, 0.21, 0], DARK),
       box([0.08, 0.03, 0.04], [-0.22, 0.15, 0], DARK),
       box([0.08, 0.03, 0.04], [0.22, 0.15, 0], DARK),
@@ -199,7 +228,10 @@ const RAW: RawProp[] = [
   {
     id: 'kos',
     name: 'Koš za smeti',
-    parts: [cyl(0.2, 0.17, 0.6, [0, 0.3, 0], 0x3f7f4f), cyl(0.21, 0.21, 0.04, [0, 0.62, 0], 0x2f5f3a)],
+    parts: [
+      lathe([[0, 0], [0.16, 0], [0.17, 0.02], [0.2, 0.58], [0.2, 0.6], [0, 0.6]], [0, 0, 0], 0x3f7f4f),
+      lathe([[0, 0], [0.21, 0], [0.21, 0.02], [0.15, 0.04], [0, 0.04]], [0, 0.6, 0], 0x2f5f3a),
+    ],
   },
   {
     id: 'blazina',
@@ -228,7 +260,7 @@ const RAW: RawProp[] = [
     id: 'skoljka',
     name: 'Straniščna školjka',
     parts: [
-      cyl(0.2, 0.15, 0.4, [0, 0.2, -0.05], WHITE),
+      lathe([[0, 0], [0.13, 0], [0.12, 0.15], [0.19, 0.36], [0.2, 0.4], [0, 0.4]], [0, 0, -0.05], WHITE),
       cyl(0.21, 0.21, 0.03, [0, 0.415, -0.05], 0xe2e2e2),
       box([0.42, 0.4, 0.18], [0, 0.6, 0.2], WHITE),
     ],
@@ -326,7 +358,7 @@ const RAW: RawProp[] = [
   {
     id: 'guma',
     name: 'Avtomobilska guma',
-    parts: [cyl(0.33, 0.33, 0.22, [0, 0.11, 0], 0x1e1e1e), cyl(0.17, 0.17, 0.224, [0, 0.112, 0], 0x8a8f96)],
+    parts: [torus(0.22, 0.11, [0, 0.11, 0], 0x1e1e1e), cyl(0.15, 0.15, 0.16, [0, 0.11, 0], 0x8a8f96)],
   },
   {
     id: 'predalnik',
@@ -465,18 +497,17 @@ const RAW: RawProp[] = [
     id: 'celada',
     name: 'Zaščitna čelada',
     parts: [
-      cyl(0.2, 0.2, 0.02, [0, 0.01, 0], 0xe8b923),
-      cyl(0.1, 0.16, 0.14, [0, 0.09, 0], 0xf2c12e),
-      sph(0.1, [0, 0.16, 0], 0xf2c12e, [1, 0.6, 1]),
+      lathe([[0, 0], [0.2, 0], [0.2, 0.015], [0.15, 0.03], [0.155, 0.1], [0.13, 0.17], [0.08, 0.21], [0, 0.22]], [0, 0, 0], 0xf2c12e),
+      cyl(0.03, 0.03, 0.2, [0, 0.13, 0], 0xe8b923, [0, 0, Math.PI / 2]),
     ],
   },
   {
     id: 'barva',
     name: 'Vedro barve',
     parts: [
-      cyl(0.17, 0.17, 0.3, [0, 0.15, 0], WHITE),
+      lathe([[0, 0], [0.15, 0], [0.165, 0.015], [0.17, 0.29], [0, 0.29]], [0, 0, 0], WHITE),
       cyl(0.172, 0.172, 0.1, [0, 0.15, 0], 0x2e6da4),
-      cyl(0.175, 0.175, 0.02, [0, 0.31, 0], 0x9aa0a6),
+      lathe([[0, 0], [0.175, 0], [0.175, 0.018], [0.16, 0.03], [0, 0.03]], [0, 0.29, 0], 0x9aa0a6),
     ],
   },
   {
@@ -492,9 +523,10 @@ const RAW: RawProp[] = [
     id: 'sodrumen',
     name: 'Rumen sod',
     parts: [
-      cyl(0.3, 0.3, 0.9, [0, 0.45, 0], 0xe8b923),
-      cyl(0.305, 0.305, 0.04, [0, 0.2, 0], 0xa67c0f),
-      cyl(0.305, 0.305, 0.04, [0, 0.7, 0], 0xa67c0f),
+      lathe(BARREL, [0, 0, 0], 0xe8b923),
+      cyl(0.3, 0.3, 0.04, [0, 0.2, 0], 0xa67c0f),
+      cyl(0.3, 0.3, 0.04, [0, 0.7, 0], 0xa67c0f),
+      cyl(0.24, 0.24, 0.006, [0, 0.9, 0], 0xa67c0f),
     ],
   },
   {
@@ -573,6 +605,21 @@ export function partBounds(part: Part): Bounds {
     hx = part.s[0] / 2;
     hy = part.s[1] / 2;
     hz = part.s[2] / 2;
+  } else if (part.k === 'lathe') {
+    const r = Math.max(...part.pts.map((q) => q[0]));
+    const ys = part.pts.map((q) => q[1]);
+    const y0 = Math.min(...ys);
+    const y1 = Math.max(...ys);
+    return {
+      min: [part.p[0] - r, part.p[1] + y0, part.p[2] - r],
+      max: [part.p[0] + r, part.p[1] + y1, part.p[2] + r],
+    };
+  } else if (part.k === 'torus') {
+    const r = part.R + part.t;
+    return {
+      min: [part.p[0] - r, part.p[1] - part.t, part.p[2] - r],
+      max: [part.p[0] + r, part.p[1] + part.t, part.p[2] + r],
+    };
   } else if (part.k === 'cyl') {
     const r = Math.max(part.rt, part.rb);
     hx = r;

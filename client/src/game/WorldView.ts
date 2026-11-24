@@ -3,13 +3,17 @@
 
 import * as THREE from 'three';
 import { propYaw, type FloorDef, type MapDef, type World } from '../../../shared/src/index';
-import { mergeParts, propGeometry, shadeByHeight, VERTEX_MATERIAL, withColor } from './models';
+import { mergeParts, propGeometry, roundedBox, shadeByHeight, VERTEX_MATERIAL, withColor } from './models';
 
 const SKIRTING = 0x5e3f28;
 const CEILING_COLOR = 0xcfc8bb;
 
 export interface WorldViewHandle {
   group: THREE.Group;
+  /** Vrata sobe lovcev (skrijejo se, ko se začne lov). */
+  gates: THREE.Object3D | null;
+  /** Ploščad dvigala (višino nastavlja igra). */
+  elevator: THREE.Object3D | null;
   dispose: () => void;
 }
 
@@ -29,14 +33,21 @@ function floorGeometry(floors: FloorDef[]): THREE.BufferGeometry {
         const z0 = f.z0 + j * f.tile;
         const x1 = Math.min(f.x1, x0 + f.tile);
         const z1 = Math.min(f.z1, z0 + f.tile);
+        // Fuga: temnejša podlaga, ploščica je malo manjša in malenkost višje.
+        const quad = (ax: number, az: number, bx: number, bz: number, y: number): void => {
+          // Trikotnika (a, c, b) in (a, d, c) imata normalo +Y.
+          const q = [ax, az, bx, bz, bx, az, ax, az, ax, bz, bx, bz];
+          for (let k = 0; k < 6; k++) {
+            pos.push(q[k * 2]!, y, q[k * 2 + 1]!);
+            nor.push(0, 1, 0);
+            col.push(tmpColor.r, tmpColor.g, tmpColor.b);
+          }
+        };
+        tmpColor.setHex(f.color2).multiplyScalar(0.62);
+        quad(x0, z0, x1, z1, 0);
+        const gap = Math.min(0.02, f.tile * 0.025);
         tmpColor.setHex((i + j) % 2 === 0 ? f.color : f.color2);
-        // Trikotnika (a, c, b) in (a, d, c) imata normalo +Y.
-        const quad = [x0, z0, x1, z1, x1, z0, x0, z0, x0, z1, x1, z1];
-        for (let k = 0; k < 6; k++) {
-          pos.push(quad[k * 2]!, 0, quad[k * 2 + 1]!);
-          nor.push(0, 1, 0);
-          col.push(tmpColor.r, tmpColor.g, tmpColor.b);
-        }
+        quad(x0 + gap, z0 + gap, x1 - gap, z1 - gap, 0.003);
       }
     }
   }
@@ -48,8 +59,17 @@ function floorGeometry(floors: FloorDef[]): THREE.BufferGeometry {
   return g;
 }
 
-function boxAt(minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number, hex: number) {
-  const g = new THREE.BoxGeometry(maxX - minX, maxY - minY, maxZ - minZ);
+function boxAt(
+  minX: number,
+  minY: number,
+  minZ: number,
+  maxX: number,
+  maxY: number,
+  maxZ: number,
+  hex: number,
+  round = 0,
+): THREE.BufferGeometry {
+  const g = round > 0 ? roundedBox(maxX - minX, maxY - minY, maxZ - minZ, round) : new THREE.BoxGeometry(maxX - minX, maxY - minY, maxZ - minZ);
   g.translate((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
   return withColor(g, hex);
 }
@@ -145,6 +165,29 @@ function clouds(map: MapDef): THREE.Mesh {
   return mesh;
 }
 
+/** Okvir in križ okna (okno je tanek kvader ob steni). */
+function windowFrame(s: [number, number, number], p: [number, number, number]): THREE.BufferGeometry[] {
+  const out: THREE.BufferGeometry[] = [];
+  const F = 0xf8f8f4;
+  const t = 0.06;
+  const alongX = s[0] > s[2];
+  const w = alongX ? s[0] : s[2];
+  const h = s[1];
+  const d = 0.04;
+  const add = (cu: number, cy: number, su: number, sy: number): void => {
+    const g = alongX ? new THREE.BoxGeometry(su, sy, d) : new THREE.BoxGeometry(d, sy, su);
+    g.translate(alongX ? p[0] + cu : p[0], p[1] + cy, alongX ? p[2] : p[2] + cu);
+    out.push(withColor(g, F));
+  };
+  add(0, h / 2, w + t, t);
+  add(0, -h / 2, w + t, t);
+  add(-w / 2, 0, t, h + t);
+  add(w / 2, 0, t, h + t);
+  add(0, 0, w, t * 0.6);
+  add(0, 0, t * 0.6, h);
+  return out;
+}
+
 export function buildWorldView(world: World): WorldViewHandle {
   const map = world.map;
   const group = new THREE.Group();
@@ -165,7 +208,8 @@ export function buildWorldView(world: World): WorldViewHandle {
   const solidGeos: THREE.BufferGeometry[] = [];
   for (const s of map.solids) {
     if (s.hidden) continue;
-    solidGeos.push(shadeByHeight(boxAt(s.minX, s.minY, s.minZ, s.maxX, s.maxY, s.maxZ, s.color), 0, 3.2, 0.62));
+    // Zaobljeni robovi (stene, odri, stebri, stopnice)
+    solidGeos.push(shadeByHeight(boxAt(s.minX, s.minY, s.minZ, s.maxX, s.maxY, s.maxZ, s.color, 0.035), 0, 3.2, 0.62));
     if (!map.outdoor && s.minY === 0) {
       solidGeos.push(boxAt(s.minX - 0.01, 0, s.minZ - 0.01, s.maxX + 0.01, 0.1, s.maxZ + 0.01, SKIRTING));
     }
@@ -175,11 +219,14 @@ export function buildWorldView(world: World): WorldViewHandle {
 
   // Okras
   if (map.decor.length) {
-    const decorGeos = map.decor.map((dc) => {
+    const decorGeos: THREE.BufferGeometry[] = [];
+    for (const dc of map.decor) {
       const g = new THREE.BoxGeometry(dc.s[0], dc.s[1], dc.s[2]);
       g.translate(dc.p[0], dc.p[1], dc.p[2]);
-      return withColor(g, dc.c);
-    });
+      decorGeos.push(withColor(g, dc.c));
+      // Okna dobijo bel okvir in križ
+      if (dc.c === 0xbfe3f5) decorGeos.push(...windowFrame(dc.s, dc.p));
+    }
     addStatic(new THREE.Mesh(mergeParts(decorGeos), VERTEX_MATERIAL));
   }
 
@@ -237,6 +284,40 @@ export function buildWorldView(world: World): WorldViewHandle {
     group.add(mesh);
   }
 
+  // Vrata sobe lovcev
+  let gates: THREE.Object3D | null = null;
+  if (map.gates?.length) {
+    const geos = map.gates.map((s) =>
+      shadeByHeight(boxAt(s.minX, s.minY, s.minZ, s.maxX, s.maxY, s.maxZ, s.color), 0, 3, 0.7),
+    );
+    // Rumeno-črne črte na vratih
+    for (const s of map.gates) {
+      for (let y = 0.3; y < s.maxY; y += 0.6) {
+        geos.push(boxAt(s.minX - 0.01, y, s.minZ - 0.01, s.maxX + 0.01, y + 0.25, s.maxZ + 0.01, 0x222222));
+      }
+    }
+    const m = new THREE.Mesh(mergeParts(geos), VERTEX_MATERIAL);
+    geometries.push(m.geometry);
+    group.add(m);
+    gates = m;
+  }
+
+  // Dvigalo
+  let elevator: THREE.Object3D | null = null;
+  if (map.elevator) {
+    const e = map.elevator;
+    const geos = [
+      boxAt(e.x0, -0.15, e.z0, e.x1, 0, e.z1, 0xf2c12e),
+      boxAt(e.x0, 0, e.z0, e.x1, 0.01, e.z0 + 0.12, 0x222222),
+      boxAt(e.x0, 0, e.z1 - 0.12, e.x1, 0.01, e.z1, 0x222222),
+      boxAt(e.x1 - 0.06, 0, e.z0, e.x1, 1.0, e.z1, 0x2e6da4),
+    ];
+    const m = new THREE.Mesh(mergeParts(geos), VERTEX_MATERIAL);
+    geometries.push(m.geometry);
+    group.add(m);
+    elevator = m;
+  }
+
   // Svetloba
   const L = map.lighting;
   const hemi = new THREE.HemisphereLight(L.hemiSky, L.hemiGround, L.hemi);
@@ -251,6 +332,8 @@ export function buildWorldView(world: World): WorldViewHandle {
 
   return {
     group,
+    gates,
+    elevator,
     dispose: () => {
       for (const g of geometries) g.dispose();
       for (const m of materials) m.dispose();

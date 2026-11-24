@@ -4,7 +4,7 @@ import { MAPS } from './maps/index';
 import { groundHeight, penetrationDepth, shapeOf, stepBody, type Body, type Box } from './physics';
 import { PROPS } from './props';
 import { MODEL_GHOST, MODEL_HUNTER } from './types';
-import { allWorlds, getWorld, placementBox } from './world';
+import { allWorlds, boxesFor, elevatorBox, elevatorY, getWorld, placementBox } from './world';
 
 function overlap3(a: Box, b: Box, eps = 1e-3): boolean {
   return (
@@ -213,6 +213,47 @@ describe('Construction: nadstropja in stopnice', () => {
     const b = walk([27, 0, 3.5], [[27, 12]]);
     expect(b.y).toBe(0);
     expect(b.z).toBeGreaterThan(11.9);
+  });
+
+  it('soba lovcev je med skrivanjem zaprta, med lovom odprta', () => {
+    const shape = { hx: HUNTER_HALF, hz: HUNTER_HALF, h: 1.7 };
+    const tryExit = (open: boolean): Body => {
+      const b: Body = { x: 6.5, y: 0, z: 6.5, vy: 0, onGround: true };
+      const boxes = boxesFor(world, open);
+      for (let i = 0; i < 180; i++) stepBody(b, shape, 0, 4, 0, false, PHYSICS_DT, boxes);
+      return b;
+    };
+    expect(tryExit(false).x).toBeLessThan(8.9);
+    expect(tryExit(true).x).toBeGreaterThan(10);
+  });
+
+  it('dvigalo vozi 0 -> 3 -> 6 m in pripelje igralca na streho', () => {
+    const ys = Array.from({ length: 400 }, (_, i) => elevatorY(world, i * 50));
+    expect(Math.min(...ys)).toBeCloseTo(0, 5);
+    expect(Math.max(...ys)).toBeCloseTo(6, 5);
+    // Igralec stoji na ploščadi, ko je spodaj, in se pelje z njo.
+    let t = 0;
+    while (elevatorY(world, t) > 0.001 || elevatorY(world, t + 100) > 0.001) t += 50;
+    const b: Body = { x: 35.1, y: 0, z: 15.5, vy: 0, onGround: true };
+    let maxY = 0;
+    for (let i = 0; i < 60 * 12; i++) {
+      t += 1000 * PHYSICS_DT;
+      const boxes = [...world.staticBoxes, elevatorBox(world, elevatorY(world, t))!];
+      stepBody(b, shape, 0, 0, 0, false, PHYSICS_DT, boxes);
+      maxY = Math.max(maxY, b.y);
+    }
+    expect(maxY).toBeGreaterThan(5.9);
+    // Na vrhu stopi na streho (zahodno).
+    while (Math.abs(elevatorY(world, t) - 6) > 0.001) {
+      t += 1000 * PHYSICS_DT;
+      stepBody(b, shape, 0, 0, 0, false, PHYSICS_DT, [...world.staticBoxes, elevatorBox(world, elevatorY(world, t))!]);
+    }
+    for (let i = 0; i < 60; i++) {
+      t += 1000 * PHYSICS_DT;
+      stepBody(b, shape, 0, -4, 0, false, PHYSICS_DT, [...world.staticBoxes, elevatorBox(world, elevatorY(world, t))!]);
+    }
+    expect(b.y).toBeCloseTo(6, 3);
+    expect(b.x).toBeLessThan(33.5);
   });
 
   it('ima 6 vrst predmetov za spremembo, dovolj primerkov in okras', () => {

@@ -106,6 +106,7 @@ export function parseSettings(raw: unknown): Partial<RoomSettings> {
   const rounds = pick(ROUND_OPTIONS, raw.rounds);
   if (rounds !== undefined) out.rounds = rounds;
   if (typeof raw.penalty === 'boolean') out.penalty = raw.penalty;
+  if (typeof raw.radar === 'boolean') out.radar = raw.radar;
   return out;
 }
 

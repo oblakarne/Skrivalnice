@@ -51,12 +51,15 @@ solids.push(
   ...hide(wallZ(48, 0, 36, [], 0.3, 17, FENCE, 3)),
 );
 
-// ---------------------------------------------------------------- ograda lovcev + pisarna
+// ---------------------------------------------------------------- soba lovcev (s streho; vrata se odprejo ob lovu)
 solids.push(
   ...wallZ(9, 0, 8, [[5.5, 7.5]], 0.2, 3, PEN),
   ...wallX(8, 0, 9, [[3, 5]], 0.2, 3, PEN),
   solid(0.3, 0, 0.3, 6.3, 2.6, 2.7, 0x7fa7c9),
+  solid(0, 3, 0, 9.1, 3.2, 8.1, 0x3f668f),
 );
+const GATE = 0xf2b01e;
+const gates: SolidDef[] = [solid(8.9, 0, 5.5, 9.1, 3, 7.5, GATE), solid(3, 0, 7.9, 5, 3, 8.1, GATE)];
 
 // ---------------------------------------------------------------- pomočniki
 /** Ograja (0.1 m debela, 1 m visoka) na višini y. */
@@ -135,14 +138,17 @@ railX(10, 10.1, 30, 34, L1);
 railX(25.9, 26, 18, 20, L1);
 railX(25.9, 26, 22, 34, L1);
 solids.push(solid(18, L1, 10.1, 18.1, L1 + 1, 25.9, RAIL));
-solids.push(solid(33.9, L1, 10.1, 34, L1 + 1, 22, RAIL));
+// Odprtina za dvigalo (z 14.5-16.5) v vzhodni ograji 1. nadstropja in strehe
+solids.push(solid(33.9, L1, 10.1, 34, L1 + 1, 14.5, RAIL));
+solids.push(solid(33.9, L1, 16.5, 34, L1 + 1, 22, RAIL));
 solids.push(solid(33.9, L1, 24, 34, L1 + 1, 25.9, RAIL));
 // Streha: ograja okoli, odprtina za stopnice na severu (x 27-29)
 railX(10, 10.1, 18, 27, L2);
 railX(10, 10.1, 29, 34, L2);
 railX(25.9, 26, 18, 34, L2);
 solids.push(solid(18, L2, 10.1, 18.1, L2 + 1, 25.9, RAIL));
-solids.push(solid(33.9, L2, 10.1, 34, L2 + 1, 25.9, RAIL));
+solids.push(solid(33.9, L2, 10.1, 34, L2 + 1, 14.5, RAIL));
+solids.push(solid(33.9, L2, 16.5, 34, L2 + 1, 25.9, RAIL));
 
 // ---------------------------------------------------------------- 3. nadstropje (9 m) nad zahodno polovico
 const L3 = 9.0;
@@ -265,6 +271,15 @@ const decor: DecorDef[] = [
   { s: [0.5, 0.5, 1.7], p: [25.6, 3.4, 27.15], c: 0xf2b01e },
   { s: [0.5, 2.6, 0.4], p: [25.6, 2.1, 26.55], c: 0xf2b01e },
   { s: [1.2, 0.7, 0.5], p: [25.6, 0.45, 26.55], c: 0x555555 },
+  // Jašek dvigala: stebri in prečka (samo okras)
+  ...[
+    [34.2, 14.5],
+    [36.05, 14.5],
+    [34.2, 16.5],
+    [36.05, 16.5],
+  ].map(([x, z]): DecorDef => ({ s: [0.1, 7.6, 0.1], p: [x!, 3.8, z!], c: 0x2e6da4 })),
+  { s: [2.0, 0.15, 0.1], p: [35.12, 7.55, 14.5], c: 0x2e6da4 },
+  { s: [2.0, 0.15, 0.1], p: [35.12, 7.55, 16.5], c: 0x2e6da4 },
   // Robovi nosilcev
   { s: [5.02, 0.06, 0.82], p: [13.5, 0.25, 3.6], c: 0x5f646b },
   // Žerjav: roka, protiutež, kabina, vrv in kavelj, beli pasovi na stebru
@@ -291,6 +306,8 @@ export const CONSTRUCTION: MapDef = {
   clouds: true,
   fog: [0xd6ebff, 70, 170],
   transformable: ['sodrumen', 'zaboj', 'stozec', 'kolut', 'cement', 'opeka'],
+  gates,
+  elevator: { x0: 34.2, z0: 14.6, x1: 36.0, z1: 16.4, stops: [0, L1, L2] },
   solids,
   floors: [{ name: 'Gradbišče', x0: 0, z0: 0, x1: 48, z1: 36, color: 0xf2c591, color2: 0xe3ae74, tile: 2 }],
   props: [
@@ -418,7 +435,7 @@ export const CONSTRUCTION: MapDef = {
     p('wc', 46.9, 14.3),
     p('zaboj', 36.0, 12.0),
     p('zaboj', 36.0, 12.85),
-    p('zapora', 36.0, 17.0, 1),
+    p('zapora', 36.8, 17.2, 1),
     p('stozec', 40.0, 17.5),
     p('stozec', 41.0, 17.5),
     p('kolut', 44.5, 18.0),

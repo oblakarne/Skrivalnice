@@ -8,4 +8,4 @@ export * from './world';
 export * from './combat';
 export * from './validation';
 export { MAPS, MAP_LIST, DEFAULT_MAP_ID, isMapId, HISA, CONSTRUCTION } from './maps/index';
-export type { MapDef, WorldPropPlacement, FloorDef, DecorDef, SolidDef, MapLighting } from './maps/index';
+export type { MapDef, WorldPropPlacement, FloorDef, DecorDef, SolidDef, MapLighting, ElevatorDef } from './maps/index';

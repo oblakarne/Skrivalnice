@@ -22,48 +22,27 @@ export const HUNTER_HALF = 0.3;
 export const HUNTER_HEIGHT = 1.7;
 export const HUNTER_EYE = 1.5;
 
-// Življenje in orožje
+// Življenje in lopata
 export const HP_MAX = 100;
-export const GUN_DAMAGE = 25;
-export const GUN_FIRE_INTERVAL_MS = 250;
-export const GUN_MAG = 12;
-export const GUN_RELOAD_MS = 1500;
-/** Doseg strela brez merka (m). */
-export const GUN_RANGE = 18;
-/** Doseg strela skozi merek (m). */
-export const GUN_RANGE_SCOPED = 45;
-export type WeaponId = 'pistol' | 'sniper';
+/** Lovec ima lopato: udarec iz bližine. */
+export const SHOVEL_DAMAGE = 50; // dva udarca ujameta skrivalca
+export const SHOVEL_INTERVAL_MS = 600;
+/** Doseg udarca z lopato (m, od glave lovca). */
+export const SHOVEL_RANGE = 2.6;
+/** Lok zamaha: polovični kot (rad) in vodoravni doseg od lovca do roba skrivalca. */
+export const SHOVEL_ARC = 0.75;
+export const SHOVEL_SWEEP_REACH = 1.9;
+/** Prikaz radarja na zaslonu (ms). */
+export const RADAR_SHOW_MS = 5000;
 
-export interface WeaponDef {
-  name: string;
-  damage: number;
-  intervalMs: number;
-  mag: number;
-  reloadMs: number;
-  /** Doseg brez merka. */
-  range: number;
-  /** Doseg skozi merek (samo ostrostrelka ima merek). */
-  scopedRange: number;
-  scope: boolean;
-}
-
-/** Pištola: hitra, kratek doseg. Ostrostrelka: počasna, močna, z merkom daleč. */
-export const WEAPONS: Readonly<Record<WeaponId, WeaponDef>> = {
-  pistol: { name: 'Pištola', damage: 25, intervalMs: 250, mag: 12, reloadMs: 1500, range: 18, scopedRange: 18, scope: false },
-  sniper: { name: 'Ostrostrelka', damage: 50, intervalMs: 1100, mag: 5, reloadMs: 2200, range: 18, scopedRange: 45, scope: true },
-};
-
-export function isWeaponId(v: unknown): v is WeaponId {
-  return v === 'pistol' || v === 'sniper';
-}
-
-/** Zorni kot kamere skozi merek (stopinje; običajno 70). */
-export const SCOPE_FOV = 30;
-/** Skozi merek se lovec premika počasneje in pogled je manj občutljiv. */
-export const SCOPE_SPEED_FACTOR = 0.5;
-export const SCOPE_SENS_FACTOR = 0.4;
+// Skrivalci: samodejna sprememba in razkrivanje imen
+/** Skrivalec se vsakih 25 s samodejno spremeni v naslednjo obliko. */
+export const AUTO_SHAPE_MS = 25000;
+/** Med lovom so imena skrivalcev v vsakem 30-sekundnem ciklu 10 s vidna vsem. */
+export const REVEAL_PERIOD_MS = 30000;
+export const REVEAL_DURATION_MS = 10000;
 export const WRONG_PROP_PENALTY = 5;
-/** Največja razdalja med izvorom strela (kamera) in glavo lovca. */
+/** Največja razdalja med izvorom udarca (kamera) in glavo lovca. */
 export const SHOT_ORIGIN_TOLERANCE = 5;
 
 /**

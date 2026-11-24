@@ -49,6 +49,7 @@ export function renderLobby(r: RoomInfo, myId: string): void {
     ['set-hunters', String(r.settings.hunters)],
     ['set-rounds', String(r.settings.rounds)],
     ['set-penalty', r.settings.penalty ? '1' : '0'],
+    ['set-radar', r.settings.radar ? '1' : '0'],
   ];
   for (const [id, value] of selects) {
     const s = $<HTMLSelectElement>(id);
